@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>GMRec</title><link rel="stylesheet" href="styles.css"></head>
+<body class="popup"><main class="shell">
+  <div class="appbar">
+    <span class="mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.5" fill="currentColor" stroke="none"/></svg></span>
+    <h1>GMRec</h1>
+    <button id="themeToggle" class="text-button" aria-pressed="false">Dark theme</button>
+  </div>
+  <p id="status" class="status" role="status" aria-live="polite">Connecting to recorder…</p>
+
+  <div id="recordingPanel" class="live" hidden>
+    <span class="live-dot" aria-hidden="true"></span>
+    <span id="phase" class="live-label">Recording</span>
+    <time id="timer">00:00:00</time>
+    <button id="pause" class="btn">Pause</button>
+  </div>
+  <p id="warning" class="warning" role="alert" hidden></p>
+
+  <div class="tabs" role="tablist" aria-label="Sections">
+    <button id="tabRecord" class="tab" role="tab" type="button" aria-selected="true" aria-controls="panelRecord">Record<span id="tileCount" class="tab-count" hidden>0</span></button>
+    <button id="tabSetup" class="tab" role="tab" type="button" aria-selected="false" aria-controls="panelSetup" tabindex="-1">Setup</button>
+    <button id="tabFiles" class="tab" role="tab" type="button" aria-selected="false" aria-controls="panelFiles" tabindex="-1">Files<span id="savedCount" class="tab-count" hidden></span></button>
+  </div>
+
+  <div class="scroll">
+    <section id="panelRecord" role="tabpanel" aria-labelledby="tabRecord" tabindex="0">
+      <div class="panel">
+        <div id="tileList" class="tile-list"><p class="tile-empty">Looking for participants and screen shares…</p></div>
+        <div class="panel-body">
+          <button id="screenshot" class="btn btn-block"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3z"/><circle cx="12" cy="13" r="3.2"/></svg>Take screenshot</button>
+        </div>
+      </div>
+      <p class="help">Each ticked video is saved to its own file, straight from the stream Meet delivers. Tick or untick while recording to add or finish a file. A control bar on the Meet page does the same without opening this popup.</p>
+    </section>
+
+    <section id="panelSetup" role="tabpanel" aria-labelledby="tabSetup" tabindex="0" hidden>
+      <div class="panel"><div class="panel-body">
+        <label class="switch-row">
+          <span>Also record my camera and microphone</span>
+          <span class="switch"><input id="includeSelf" type="checkbox" checked><span class="switch-track" aria-hidden="true"></span></span>
+        </label>
+        <p id="deviceSummary" class="help">Choose devices and allow access in Device setup.</p>
+        <button id="setup" class="btn btn-block" style="margin-top:12px">Device setup</button>
+      </div></div>
+
+      <div class="panel" style="margin-top:12px"><div class="panel-body">
+        <div class="field"><label for="saveFolder">Save location</label><input id="saveFolder" maxlength="120" value="GMRec" autocomplete="off" spellcheck="false" placeholder="GMRec"></div>
+        <p id="savePath" class="help path-preview"></p>
+        <label class="switch-row" style="margin-top:4px">
+          <span>Ask where to save each file</span>
+          <span class="switch"><input id="askWhereToSave" type="checkbox"><span class="switch-track" aria-hidden="true"></span></span>
+        </label>
+        <p class="help">Recordings go inside your browser's Downloads folder — an extension cannot write anywhere else. Use a path like <code>Work/Meetings</code> to file them, turn the switch on to pick a destination for every file, or change the download location in Chrome settings to move all of them at once.</p>
+      </div></div>
+
+      <div class="panel" style="margin-top:12px"><div class="panel-body">
+        <div class="field"><label for="name">Folder name prefix</label><input id="name" maxlength="60" value="gmrec" autocomplete="off"></div>
+        <div class="field"><label id="qualityLabel">Your camera resolution</label><div id="qualitySelect" aria-labelledby="qualityLabel"></div></div>
+      </div></div>
+      <p class="help">Participants and screen shares are always saved at the quality Meet delivers, so this affects only your own camera file and the encoding bitrate. 720p is smoothest on most laptops.</p>
+      <p class="help"><button id="howItWorks" class="text-button" type="button">How GMRec works</button></p>
+    </section>
+
+    <section id="panelFiles" role="tabpanel" aria-labelledby="tabFiles" tabindex="0" hidden>
+      <div class="panel">
+        <div class="panel-body panel-bar">
+          <span class="tag">Local backups</span>
+          <button id="refreshLibrary" class="text-button">Refresh</button>
+        </div>
+        <div id="library" aria-live="polite"></div>
+      </div>
+      <p class="help">Backups stay here until removed; downloaded files are separate. Interrupted recordings may be incomplete.</p>
+    </section>
+  </div>
+
+  <div class="footer">
+    <div class="actions">
+      <button id="start" class="btn btn-primary" disabled><span class="btn-dot" aria-hidden="true"></span>Start recording</button>
+      <button id="stop" class="btn btn-danger" disabled>Stop &amp; save</button>
+    </div>
+    <p class="help footer-note">Record only with everyone's knowledge and consent. Files stay on this device.</p>
+  </div>
+</main><script src="popup.js"></script></body></html>

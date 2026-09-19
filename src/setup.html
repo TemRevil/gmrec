@@ -1,0 +1,11 @@
+<!doctype html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>GMRec · Device setup</title><link rel="stylesheet" href="styles.css"></head>
+<body class="setup-page"><main>
+<div class="heading-row"><p class="eyebrow">GMRec · device setup</p><button id="themeToggle" class="text-button" aria-pressed="false">Dark theme</button></div>
+<h1>Check your camera &amp; microphone</h1><p class="status">Allow access here, choose devices, then stop the preview and return to your Meet tab to record.</p>
+<p id="status" role="status" aria-live="polite">Click Allow &amp; test to request access. No recording is saved during this test.</p>
+<div class="card"><label for="camera">Camera</label><select id="camera"><option value="default">Default camera</option></select>
+<label for="microphone">Microphone</label><select id="microphone"><option value="default">Default microphone</option></select>
+<video id="preview" class="preview" muted autoplay playsinline hidden></video><div class="meter" role="meter" aria-label="Microphone input level" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span id="level"></span></div>
+<div class="setup-actions"><button id="test" class="primary">Allow &amp; test</button><button id="stopPreview" disabled>Stop preview &amp; save choices</button></div></div>
+<p class="help">If access was blocked, use this page’s site controls to allow camera and microphone access. You can also turn off “Also record my camera and microphone” in GMRec to capture only the participant.</p>
+</main><script src="setup.js"></script></body></html>

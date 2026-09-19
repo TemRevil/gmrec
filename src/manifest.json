@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "GMRec",
+  "version": "0.4.0",
+  "minimum_chrome_version": "120",
+  "description": "Consented Google Meet camera and microphone recorder.",
+  "permissions": ["activeTab", "tabs", "scripting", "tabCapture", "offscreen", "storage", "downloads"],
+  "host_permissions": ["https://meet.google.com/*"],
+  "background": { "service_worker": "background.js", "type": "module" },
+  "action": {
+    "default_title": "GMRec",
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [{
+    "matches": ["https://meet.google.com/*"],
+    "js": ["content.js"],
+    "run_at": "document_idle"
+  }]
+}

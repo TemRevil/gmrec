@@ -1,0 +1,61 @@
+<!doctype html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>GMRec · Getting started</title><link rel="stylesheet" href="styles.css"></head>
+<body class="setup-page onboarding"><main>
+
+<div class="heading-row">
+  <p class="eyebrow">GMRec · getting started</p>
+  <button id="themeToggle" class="text-button" aria-pressed="false">Dark theme</button>
+</div>
+<h1>Record each person in a Meet as their own file</h1>
+<p class="lede">GMRec takes every participant's video straight from the live stream Google Meet delivers, not from pixels on your screen. Each camera and screen share becomes its own clean file, at the ratio their camera actually sends.</p>
+
+<p class="consent" role="note"><strong>Before anything else:</strong> tell everyone in the meeting that you are recording, and record only with their agreement. Recording people without consent is illegal in many places. Nothing GMRec does is hidden from you, but nothing tells the other participants either.</p>
+
+<ol class="steps">
+  <li>
+    <h2>Check your camera and microphone</h2>
+    <p>Open <strong>Device setup</strong> once and allow access. This picks which camera and microphone go into your own file, and confirms Chrome can reach them. Nothing is recorded during the test.</p>
+    <p class="step-action"><button id="setup" class="btn">Open device setup</button><span class="step-note">Skip this if you only want to record other people.</span></p>
+  </li>
+  <li>
+    <h2>Open your meeting and pick who to record</h2>
+    <p>In the Meet tab, click the GMRec toolbar icon. The <strong>Record</strong> tab lists every camera and screen share it can see, updating as people join, leave or start presenting. Tick the ones you want. Each tick is a separate file.</p>
+  </li>
+  <li>
+    <h2>Start, and leave it alone</h2>
+    <p>Press <strong>Start recording</strong> — in the popup, or on the control bar GMRec puts on the Meet page itself. Resizing the window, switching tabs, covering a tile with a menu or scrolling it out of view changes nothing: the recording does not come from the screen.</p>
+    <p>If someone starts sharing their screen mid-recording, a prompt asks whether to add it as another file.</p>
+  </li>
+  <li>
+    <h2>Stop, and find your folder</h2>
+    <p>Everything from one session lands in a single folder named for the meeting and its date. Inside, files carry the participants' names, plus <code>meeting-audio.m4a</code> — a standalone recording of the whole meeting's sound — and <code>recording-info.json</code>, which describes what each file contains.</p>
+    <p class="step-note">Choose where that folder goes under <strong>Setup → Save location</strong>.</p>
+  </li>
+</ol>
+
+<h2 class="section-title">Worth knowing</h2>
+<div class="facts">
+  <div class="fact">
+    <h3>It keeps going</h3>
+    <p>A camera switching off, a voice dropping, a participant leaving, even the meeting ending — none of it finalises a file. Recording continues until you press Stop, so one timeline covers the session.</p>
+  </div>
+  <div class="fact">
+    <h3>Nothing leaves this device</h3>
+    <p>Files are written to your own Downloads folder. Chunks are kept in the extension's local storage as a backup while recording, and you can clear them from the <strong>Files</strong> tab. There is no server and no account.</p>
+  </div>
+  <div class="fact">
+    <h3>Quality is Meet's ceiling</h3>
+    <p>GMRec records exactly what Meet sends and re-encodes it as H.264 High profile MP4. It pins a tile you select, because Meet sends more detail for a prominent tile — but nothing can add detail Meet never sent.</p>
+  </div>
+  <div class="fact">
+    <h3>Whose voice goes where</h3>
+    <p>Your microphone goes only into your own file. A participant's file carries their own voice when Meet exposes it separately, and the meeting's shared audio when it does not.</p>
+  </div>
+</div>
+
+<div class="onboard-footer">
+  <button id="meet" class="btn btn-primary">Open Google Meet</button>
+  <button id="done" class="btn">Close this page</button>
+</div>
+<p class="help">You can reopen this page any time from <strong>Setup → How GMRec works</strong>.</p>
+
+</main><script src="onboarding.js"></script></body></html>
