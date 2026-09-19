@@ -1,5 +1,8 @@
 # Contributing to GMRec
 
+Maintainer: **TemRevil** — [temrevil@gmail.com](mailto:temrevil@gmail.com) ·
+[hello@temrevil.com](mailto:hello@temrevil.com)
+
 **Anyone can contribute.** No invitation, no prior involvement, no gatekeeping. Open an issue,
 send a pull request, or fix a typo — all of it is welcome.
 
@@ -55,7 +58,8 @@ every file.
 
 GMRec records people. If you find something that lets a page, another extension, or a non-Meet
 tab start a recording, reach a recording it does not own, or write outside the Downloads folder,
-please report it privately to the maintainer before opening a public issue.
+please report it privately before opening a public issue:
+**[temrevil@gmail.com](mailto:temrevil@gmail.com)** (or `hello@temrevil.com`).
 
 ## Scope
 

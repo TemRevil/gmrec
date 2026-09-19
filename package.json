@@ -17,7 +17,7 @@
   },
   "description": "Chrome extension that records each Google Meet participant into their own MP4, from their real stream.",
   "license": "MIT",
-  "author": "TemRevil",
+  "author": "TemRevil <temrevil@gmail.com>",
   "repository": {
     "type": "git",
     "url": "https://github.com/TemRevil/gmrec.git"
@@ -29,5 +29,10 @@
     "webrtc",
     "mediarecorder",
     "manifest-v3"
-  ]
+  ],
+  "bugs": {
+    "url": "https://github.com/TemRevil/gmrec/issues",
+    "email": "temrevil@gmail.com"
+  },
+  "homepage": "https://github.com/TemRevil/gmrec#readme"
 }

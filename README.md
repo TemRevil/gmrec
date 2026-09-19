@@ -239,6 +239,13 @@ It requests `tabCapture` (meeting audio), `downloads` (saving files), `storage` 
 chunk backups), `offscreen` (the recorder document), `scripting` / `activeTab` / `tabs` (reaching
 the Meet tab), and host access to `https://meet.google.com/*` only.
 
+## Contact
+
+Maintained by **TemRevil** — [temrevil@gmail.com](mailto:temrevil@gmail.com) ·
+[hello@temrevil.com](mailto:hello@temrevil.com).
+For bugs and feature requests, prefer
+[an issue](https://github.com/TemRevil/gmrec/issues) so others can find the answer.
+
 ## License
 
 [MIT](LICENSE) — free to use, modify and distribute.

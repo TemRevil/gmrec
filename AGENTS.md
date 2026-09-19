@@ -185,3 +185,8 @@ Do not add, without the maintainer asking:
 - broader host permissions than `https://meet.google.com/*`
 
 If a change needs one of these, open an issue and make the case first.
+
+## Maintainer
+
+TemRevil — [temrevil@gmail.com](mailto:temrevil@gmail.com). Security issues go there privately,
+not to a public issue.
