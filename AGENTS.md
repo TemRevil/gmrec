@@ -147,10 +147,17 @@ root's *own* shadow root: when the root is a custom-element host, everything is 
 `querySelectorAll` on the host returns nothing. `textContent` likewise stops at a shadow boundary
 and comes back empty — `deepText` is what reads a name tag.
 
-### 13. Only Google Meet gets double-clicked
+### 13. Pin by pressing the site's own Pin control, never by simulating a gesture
 
-Spotlighting a tile is a Meet behaviour, gated behind `adapter.spotlight`. On another product the
-same gesture could mean anything, so GMRec records what the page already sends.
+A synthetic `dblclick` on a Meet tile **does nothing** — that was shipped and it never worked.
+Pinning presses the real control, found by the `Pin …` / `Unpin …` aria-label the tile already
+exposes (the same labels names are read from, so they are known to be in the DOM without
+hovering). It is gated behind `adapter.spotlight`, set only where a pin control is known to exist
+and to mean this.
+
+Two rules that follow: a tile showing an **Unpin** control is already pinned, so pressing Pin
+would toggle it *off* — leave it alone. And `pinnedByUs` is set only after the control actually
+flipped, so stopping never releases a pin the user set themselves.
 
 ### 14. A site is authorised by origin, not by frame index
 

@@ -89,21 +89,37 @@ through your speakers.
 
 ## Supported sites
 
-| Site | How tiles are found | Names |
-|---|---|---|
-| **Google Meet** | `[data-participant-id]` tiles | From Meet's own control labels (`Pin <Name>`, `<Name> is presenting`) |
-| **ADPList** | Its sessions run on [Dyte](https://dyte.io), whose UI Kit renders every tile inside an **open shadow root** — a plain `querySelectorAll("video")` finds nothing there | From the rendered `<dyte-name-tag>` |
-| **Anything else you add** | The tile is the nearest ancestor holding exactly that one video, shadow roots included | Control labels, then the visible name chip; `Participant 1, 2, …` when the site renders no name |
+| Site | Status | Names come from | Auto-pin |
+|---|---|---|---|
+| **Google Meet** | Built in | Meet's own control labels (`Pin <Name>`, `<Name> is presenting`) | Yes |
+| **ADPList** | Built in | The rendered `<dyte-name-tag>` | No |
+| **Any other meeting site** | You add it | Control labels, then the visible name chip | No |
 
-Add a site under **Setup → Sites GMRec can record**: paste the meeting page's address and Chrome
-asks permission for that origin. Permission is per-origin — allowing `app.example.com` does not
-allow anything else — and removing the site revokes it.
+Add one under **Setup → Sites GMRec can record**: paste the meeting page's address, and Chrome
+asks permission for that origin. Permission is per-origin — allowing `app.example.com` allows
+nothing else — and removing the site revokes it.
 
-An ADPList booking can also be a Google Meet, Zoom or Teams link rather than an ADPList session;
-in that case it is that product's tab you record, with that product's adapter.
+### How each one is read
 
-**Known limitation:** the call must render in the tab's own document. A call embedded from another
-origin in an iframe is not reached yet.
+- **Google Meet** marks tiles with `data-participant-id`, and its control labels carry the
+  participant's name. Selecting a tile presses Meet's own **Pin** control, because Meet sends a
+  higher-quality stream for a pinned tile. A tile you pinned yourself is left alone, and GMRec
+  releases only a pin it took.
+- **ADPList** runs its own sessions on [Dyte](https://dyte.io), whose UI Kit renders every tile
+  inside an **open shadow root**. A plain `querySelectorAll("video")` finds *nothing* there, so
+  GMRec walks shadow roots to find tiles and to read the name tag. An ADPList booking can also be
+  a Google Meet, Zoom or Teams link instead of an ADPList session — then it is that product's tab
+  you record.
+- **Anything else** falls to the generic reader: the tile is the nearest ancestor holding exactly
+  that one video, shadow roots included, and the name is whatever the tile renders. Where a site
+  exposes no name at all, tiles are listed as `Participant 1, 2, …` and files are named to match.
+
+Pinning is deliberately limited to sites where a pin control is known to exist and to mean this.
+Elsewhere GMRec records what the page already sends rather than pressing buttons it cannot
+interpret.
+
+**Known limitation:** the call must render in the tab's own document. A call embedded from
+another origin in an iframe is not reached yet.
 
 ---
 

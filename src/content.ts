@@ -560,21 +560,37 @@ function drawOverlay(now: number) {
   }
   overlayRaf = requestAnimationFrame(drawOverlay);
 }
-// Best-effort: ask Meet to pin the tile so Meet requests a higher-quality stream for it.
-// Meet only spotlights one tile at a time, so pinning a second selected tile un-pins the first.
+// Pinning asks the meeting to send a higher-quality stream for a tile, so it is worth doing —
+// but it has to be done the way the product actually does it. A synthetic double-click on the
+// tile does nothing in Google Meet; what works is pressing the same Pin control a person would,
+// found by the aria-label the tile already exposes. Those labels are also what names are read
+// from, so they are known to be present without hovering first.
+const PIN_LABEL = /^pin\b/i;
+const UNPIN_LABEL = /^(unpin\b|remove from screen\b)/i;
+function pinControl(entry: Tracked, pattern: RegExp): HTMLElement | null {
+  const container = containerOf(entry.video);
+  if (!container) return null;
+  for (const node of deepQueryAll(container, "button, [role='button'], [role='menuitem']")) {
+    const label = (node.getAttribute("aria-label") ?? node.getAttribute("data-tooltip") ?? node.getAttribute("title") ?? "").trim();
+    if (label && pattern.test(label)) return node as HTMLElement;
+  }
+  return null;
+}
 function attemptPin(entry: Tracked) {
   entry.pinnedByUs = false;
-  // Only where double-click is known to spotlight a tile. On another product the same gesture
-  // could mean anything, so GMRec records what the page already sends rather than poking it.
+  // Only where a pin control is known to exist and to mean this. Elsewhere GMRec records what
+  // the page already sends rather than pressing buttons it does not understand.
   if (!adapter.spotlight) return;
   try {
-    const rect = entry.video.getBoundingClientRect();
-    if (rect.width * rect.height > innerWidth * innerHeight * 0.55) return; // Already large; avoid toggling off a manual pin.
-    const cx = rect.left + rect.width / 2, cy = rect.top + rect.height / 2;
-    const target = document.elementFromPoint(cx, cy);
-    if (!target) return;
-    target.dispatchEvent(new MouseEvent("dblclick", { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy }));
-    entry.pinnedByUs = true;
+    // An unpin control means this tile is already pinned, by the user or by us. Pressing pin
+    // again would toggle it off, and unpinning someone's manual choice is not ours to do.
+    if (pinControl(entry, UNPIN_LABEL)) return;
+    const control = pinControl(entry, PIN_LABEL);
+    if (!control) return;
+    control.click();
+    // Only claim the pin if the control actually flipped, so stopping does not "unpin" a tile
+    // that was never pinned.
+    entry.pinnedByUs = !!pinControl(entry, UNPIN_LABEL);
   } catch { /* Meet's DOM can change at any time; pinning is a quality aid, never required. */ }
 }
 function attemptUnpin(entry: Tracked) {
@@ -582,9 +598,7 @@ function attemptUnpin(entry: Tracked) {
   entry.pinnedByUs = false;
   try {
     if (!entry.video.isConnected) return;
-    const rect = entry.video.getBoundingClientRect();
-    const cx = rect.left + rect.width / 2, cy = rect.top + rect.height / 2;
-    document.elementFromPoint(cx, cy)?.dispatchEvent(new MouseEvent("dblclick", { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy }));
+    pinControl(entry, UNPIN_LABEL)?.click();
   } catch { /* best effort */ }
 }
 async function call(type: string, payload: object = {}): Promise<unknown> {

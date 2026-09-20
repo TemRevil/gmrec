@@ -106,8 +106,15 @@ try {
   window.__feed=feed;
   window.__remoteFeed=remoteFeed;
   remoteFeed(1280,720,210,880).then(stream=>{document.querySelector('video').srcObject=stream;});
-  window.__pinCount=0;
-  document.getElementById('tile').addEventListener('dblclick',()=>{window.__pinCount++;});
+  // Meet pins from its own Pin control, not from a double-click on the tile. The fixture counts
+  // both, so the test can assert GMRec presses the control and never fires a stray gesture.
+  window.__pinClicks=0;window.__unpinClicks=0;window.__dblClicks=0;
+  document.getElementById('tile').addEventListener('dblclick',()=>{window.__dblClicks++;});
+  const pinBtn=document.querySelector('[aria-label="Pin Mohammed Ahmed"]');
+  pinBtn.addEventListener('click',()=>{
+    if(pinBtn.getAttribute('aria-label').startsWith('Unpin')){window.__unpinClicks++;pinBtn.setAttribute('aria-label','Pin Mohammed Ahmed');}
+    else{window.__pinClicks++;pinBtn.setAttribute('aria-label','Unpin Mohammed Ahmed');}
+  });
   const audio=new AudioContext();const tone=audio.createOscillator();tone.frequency.value=440;tone.connect(audio.destination);tone.start();audio.resume();
   </script></body></html>` }));
   const meet = await context.newPage();
@@ -123,7 +130,22 @@ try {
   // Named from the tile's own label, skipping the Material icon ligature sitting next to it.
   assert.equal(detected[0].label, "Mohammed Ahmed", `tile should be named from Meet's control labels, got "${detected[0].label}"`);
   assert.equal(await selectTile(detected[0].id, true), true);
-  assert.equal(await meet.evaluate(() => window.__pinCount), 1, "selecting a small tile triggers a best-effort pin (dblclick)");
+  // Selecting a tile presses Meet's own Pin control, which is what actually makes Meet send a
+  // higher-quality stream. A synthetic double-click does nothing in Meet, so it must not be used.
+  assert.equal(await meet.evaluate(() => window.__pinClicks), 1, "selecting a tile must press Meet's Pin control");
+  assert.equal(await meet.evaluate(() => window.__dblClicks), 0, "no stray double-click: Meet ignores it and it can mean other things");
+  assert.equal(await meet.evaluate(() => document.querySelector('[aria-label^="Unpin Mohammed"]') !== null), true, "the tile should now read as pinned");
+  // Deselecting hands the tile back: GMRec releases only the pin it took.
+  assert.equal(await selectTile(detected[0].id, false), true);
+  assert.equal(await meet.evaluate(() => window.__unpinClicks), 1, "deselecting should release the pin GMRec took");
+  assert.equal(await meet.evaluate(() => document.querySelector('[aria-label^="Pin Mohammed"]') !== null), true, "the tile should read as unpinned again");
+  // A tile the user pinned themselves is left alone: pressing Pin again would toggle it OFF,
+  // which is the opposite of what selecting it is meant to do.
+  await meet.evaluate(() => document.querySelector('[aria-label^="Pin Mohammed"]').click());
+  const manualPins = await meet.evaluate(() => window.__pinClicks);
+  assert.equal(await selectTile(detected[0].id, true), true);
+  assert.equal(await meet.evaluate(() => window.__pinClicks), manualPins, "an already-pinned tile must not be toggled off by selecting it");
+  assert.equal(await meet.evaluate(() => window.__unpinClicks), 1, "and a pin the user set must not be released later");
   console.log("Tile auto-detection, toggle, and auto-pin passed");
 
   // Meet replaces the <video> element whenever a camera is toggled or switched. That must
