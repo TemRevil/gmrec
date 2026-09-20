@@ -155,10 +155,12 @@ exposes (the same labels names are read from, so they are known to be in the DOM
 hovering). It is gated behind `adapter.spotlight`, set only where a pin control is known to exist
 and to mean this.
 
-A pin is a three-state thing on the entry — `none` → `requested` (we clicked) → `held`
-(confirmed). Ownership starts at the *click*, not at the confirmation: a tile deselected in
-between must still be released, or Meet stays pinned to something nobody is recording and
-`foreignPinExists()` then blocks every later pin.
+**GMRec remembers exactly one thing about pinning: `ourPin`, the id of the tile it pinned, or
+null.** Everything else — whether that tile is still pinned, whether anything else is — is read
+back off the page by `reconcilePins()` on every scan. Three rounds of review found bugs in
+earlier versions and *every one* was remembered state drifting from what the page showed: a pin
+claimed before the click landed, a claim dropped while the pin stayed, two tiles both believing
+they held the one pin Meet allows. Do not reintroduce per-tile pin flags or confirmation timers.
 
 Four rules follow:
 
@@ -171,10 +173,12 @@ Four rules follow:
    `foreignPinExists()` checks the whole document, excluding pins GMRec itself holds so that
    re-selecting and multi-select still work. Consequence, accepted on purpose: while a screen
    share is on the main stage, nothing gets auto-pinned.
-3. **Never give up a watch because the element vanished.** Pinning changes the layout, which is
-   exactly when Meet swaps a tile's `<video>`. The entry survives (`scan()` rebinds it), so the
-   timer chain must too — and it must be cleared in `attemptUnpin`, when a tile is pruned, and
-   in `__gmrecDispose`, or it outlives everything that could release the pin.
+3. **"Unreadable" is not "unpinned".** `pinStateOf` returns `pinned` / `unpinned` / **`unknown`**.
+   A tile detached mid-re-render — which pinning itself triggers, since it changes the layout —
+   is unknown, and the claim is kept. Collapsing that into "unpinned" drops the claim while Meet
+   is still pinned, and the pin is stranded for the rest of the call. Likewise, nothing is read
+   at all while a click is still settling (`pinCooldownUntil`), or our own pin would read as
+   never having happened.
 4. **Do not disambiguate pin controls by `entry.kind`.** It is circular: `detectKind` calls any
    container carrying a presentation label a screen tile, so the kind is derived from the very
    labels it would be used to choose between. A presentation gets its own tile in Meet, so the

@@ -143,47 +143,52 @@ try {
   await poll(pinState, value => value.pinned, "selecting a tile presses Meet's Pin control");
   assert.deepEqual({ ...await pinState() }, { pins: 1, unpins: 0, dbl: 0, pinned: true },
     "exactly one Pin press, and no stray double-click: Meet ignores it and it can mean other things");
-  // Deselecting hands the tile back. The label flips a tick after the click, so the extension has
-  // to wait for it before claiming the pin — otherwise it never releases one.
+  // Deselecting hands the tile back. The label flips a tick after the click, so nothing here can
+  // be keyed on the click having taken effect synchronously.
   assert.equal(await selectTile(detected[0].id, false), true);
-  const released = await poll(pinState, value => !value.pinned, "deselecting releases the pin GMRec took");
+  const released = await poll(pinState, value => value.unpins === 1 && !value.pinned, "deselecting releases the pin GMRec took");
   assert.deepEqual({ ...released }, { pins: 1, unpins: 1, dbl: 0, pinned: false });
-  // Deselecting DURING the confirmation window must still release the pin. The click has landed
-  // but the label has not flipped yet, so anything keyed on "confirmed" would strand it.
-  assert.equal(await selectTile(detected[0].id, true), true);
-  await selectTile(detected[0].id, false); // no await on the flip: straight back off again
-  // Poll the unpin counter, not the label: right after deselecting the label still reads "Pin",
-  // so "not pinned" cannot tell "never landed" apart from "landed and released".
-  const afterRace = await poll(pinState, value => value.unpins === 2, "a pin released mid-confirmation");
-  assert.deepEqual({ ...afterRace }, { pins: 2, unpins: 2, dbl: 0, pinned: false },
-    "deselecting before the pin is confirmed must still give it back");
 
   // Pinning changes the layout, which is exactly when Meet swaps a tile's <video> for a new one.
-  // The watch has to survive that, or the pin is never released again.
+  // The tile is rebound, and the pin must still be released afterwards.
   assert.equal(await selectTile(detected[0].id, true), true);
+  await poll(pinState, value => value.pinned, "pinned again");
   await meet.evaluate(async () => {
     const old = document.getElementById("person");
     const stream = old.srcObject;
-    old.remove();                                   // detached mid-confirmation, as Meet does
-    await new Promise(r => setTimeout(r, 120));
+    old.remove();
+    // Long enough to outlast the reconciler's cooldown, so the tile really is read while it is
+    // detached. A shorter gap proves nothing: the cooldown alone would cover it.
+    await new Promise(r => setTimeout(r, 2000));
     const fresh = document.createElement("video");
     fresh.id = "person"; fresh.autoplay = true; fresh.muted = true; fresh.playsInline = true;
     fresh.style.cssText = "width:640px;height:360px;transform:scaleX(-1)";
     fresh.srcObject = stream;
     document.getElementById("tile").prepend(fresh);
   });
-  await poll(pinState, value => value.pinned, "the pin survives the element swap");
   assert.equal(await selectTile(detected[0].id, false), true);
-  const afterSwap = await poll(pinState, value => value.unpins === 3, "and is still released afterwards");
-  assert.deepEqual({ ...afterSwap }, { pins: 3, unpins: 3, dbl: 0, pinned: false });
+  const afterSwap = await poll(pinState, value => value.unpins === 2 && !value.pinned, "released even after the element was swapped");
+  assert.deepEqual({ ...afterSwap }, { pins: 2, unpins: 2, dbl: 0, pinned: false });
+
+  // Unpinning by hand while the tile is still selected must be noticed and put right: the pin
+  // state is read back off the page, so a stale claim cannot survive.
+  assert.equal(await selectTile(detected[0].id, true), true);
+  await poll(pinState, value => value.pins === 3 && value.pinned, "pinned for the self-heal check");
+  await meet.evaluate(() => document.querySelector('[aria-label^="Unpin Mohammed"]').click());
+  const healed = await poll(pinState, value => value.pins === 4 && value.pinned, "a pin taken away by hand is taken again");
+  assert.deepEqual({ ...healed }, { pins: 4, unpins: 3, dbl: 0, pinned: true });
+  assert.equal(await selectTile(detected[0].id, false), true);
+  await poll(pinState, value => value.unpins === 4 && !value.pinned, "and released again on deselect");
 
   // A tile the user pinned themselves is left alone: pressing Pin again would toggle it OFF,
   // which is the opposite of what selecting it is meant to do.
   await meet.evaluate(() => document.querySelector('[aria-label^="Pin Mohammed"]').click());
   await poll(pinState, value => value.pinned, "manual pin applied");
   assert.equal(await selectTile(detected[0].id, true), true);
-  await meet.waitForTimeout(400);
-  assert.deepEqual({ ...await pinState() }, { pins: 4, unpins: 3, dbl: 0, pinned: true },
+  // Well past the reconciler's cooldown and several scans, so a wrong implementation has had
+  // every chance to press something.
+  await meet.waitForTimeout(2500);
+  assert.deepEqual({ ...await pinState() }, { pins: 5, unpins: 4, dbl: 0, pinned: true },
     "a tile that is already pinned must not be toggled, and that pin must not be released later");
   console.log("Tile auto-detection, toggle, and auto-pin passed");
 
