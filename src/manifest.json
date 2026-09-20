@@ -3,17 +3,43 @@
   "name": "GMRec",
   "version": "0.4.0",
   "minimum_chrome_version": "120",
-  "description": "Consented Google Meet camera and microphone recorder.",
-  "permissions": ["activeTab", "tabs", "scripting", "tabCapture", "offscreen", "storage", "downloads"],
-  "host_permissions": ["https://meet.google.com/*"],
-  "background": { "service_worker": "background.js", "type": "module" },
+  "description": "Record each meeting participant into their own video file, from their own stream.",
+  "permissions": [
+    "activeTab",
+    "tabs",
+    "scripting",
+    "tabCapture",
+    "offscreen",
+    "storage",
+    "downloads"
+  ],
+  "host_permissions": [
+    "https://meet.google.com/*",
+    "https://adplist.org/*",
+    "https://*.adplist.org/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
   "action": {
     "default_title": "GMRec",
     "default_popup": "popup.html"
   },
-  "content_scripts": [{
-    "matches": ["https://meet.google.com/*"],
-    "js": ["content.js"],
-    "run_at": "document_idle"
-  }]
+  "content_scripts": [
+    {
+      "matches": [
+        "https://meet.google.com/*",
+        "https://adplist.org/*",
+        "https://*.adplist.org/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "optional_host_permissions": [
+    "https://*/*"
+  ]
 }

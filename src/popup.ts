@@ -1,5 +1,5 @@
 import type { DetectedTile, RecorderState, SavedRecording, Settings } from "./types";
-import { defaults, errorMessage, formatTime, meetingFolder, normalizeSettings } from "./shared";
+import { defaults, errorMessage, formatTime, meetingFolder, normalizeSettings, normalizeSite, siteLabel } from "./shared";
 import { createSelect, element, initTheme, send } from "./client";
 
 const status = element<HTMLParagraphElement>("status");
@@ -13,6 +13,7 @@ const includeSelf = element<HTMLInputElement>("includeSelf");
 const name = element<HTMLInputElement>("name");
 const saveFolder = element<HTMLInputElement>("saveFolder");
 const askWhereToSave = element<HTMLInputElement>("askWhereToSave");
+const siteInput = element<HTMLInputElement>("siteInput");
 let settings: Settings = { ...defaults };
 const qualitySelect = createSelect(element("qualitySelect"), [{ value: "720p", label: "720p · 30 fps (recommended)" }, { value: "1080p", label: "1080p · 30 fps" }], settings.quality, value => { settings = normalizeSettings({ ...settings, quality: value as Settings["quality"] }); void chrome.storage.local.set({ settings }).catch(showError); });
 // Disabled until stored settings finish loading (see `initialized` below), so an early click
@@ -53,7 +54,7 @@ function renderTiles() {
   if (!tiles.length) {
     const empty = document.createElement("p");
     empty.className = "tile-empty";
-    empty.textContent = "No videos detected yet. Open the Meet tab and make sure at least one person's camera is on.";
+    empty.textContent = "No videos detected yet. Open the meeting tab and make sure at least one person's camera is on.";
     tileList.append(empty);
     return;
   }
@@ -125,6 +126,45 @@ async function saveSettings() {
 for (const input of [includeSelf, name, saveFolder, askWhereToSave]) input.addEventListener("change", () => { void saveSettings().catch(showError); });
 for (const input of [name, saveFolder]) input.addEventListener("input", renderSavePath);
 element("howItWorks").addEventListener("click", () => { void run(async () => { await send("onboarding"); window.close(); }); });
+
+// ---- Sites ------------------------------------------------------------------------------------
+// Built-in sites come from the manifest and cannot be removed; user-added ones each hold an
+// optional host permission, which is requested here because Chrome only grants one on a gesture.
+let userSites: string[] = [];
+const BUILT_IN = [{ label: "Google Meet", host: "meet.google.com" }, { label: "ADPList", host: "adplist.org" }];
+function renderSites() {
+  const list = element("siteList");
+  list.replaceChildren();
+  for (const site of BUILT_IN) {
+    const row = document.createElement("div"); row.className = "tile-row site-row";
+    const name = document.createElement("span"); name.className = "tile-name"; name.textContent = site.label;
+    const meta = document.createElement("span"); meta.className = "tile-meta"; meta.textContent = "Built in";
+    row.append(name, meta); list.append(row);
+  }
+  for (const origin of userSites) {
+    const row = document.createElement("div"); row.className = "tile-row site-row";
+    const name = document.createElement("span"); name.className = "tile-name"; name.textContent = origin.replace(/^https?:\/\//, "");
+    const remove = document.createElement("button"); remove.className = "text-button"; remove.textContent = "Remove";
+    remove.addEventListener("click", () => { void run(async () => {
+      await chrome.permissions.remove({ origins: [`${origin}/*`] }).catch(() => {});
+      userSites = await send<{ sites: string[] }>("sites", { sites: userSites.filter(s => s !== origin) }).then(r => r.sites);
+      renderSites();
+    }); });
+    row.append(name, remove); list.append(row);
+  }
+}
+element("addSite").addEventListener("click", () => { void run(async () => {
+  const origin = normalizeSite(siteInput.value);
+  if (!origin) throw new Error("Enter a site address, for example app.example.com.");
+  if (userSites.includes(origin)) { status.textContent = `${siteLabel(origin)} is already allowed.`; return; }
+  // Must be called straight from the click: Chrome only grants an optional permission on a gesture.
+  const granted = await chrome.permissions.request({ origins: [`${origin}/*`] });
+  if (!granted) throw new Error("Chrome did not grant access to that site, so GMRec cannot read its tiles.");
+  userSites = await send<{ sites: string[] }>("sites", { sites: [...userSites, origin] }).then(r => r.sites);
+  siteInput.value = "";
+  renderSites();
+  status.textContent = `${siteLabel(origin)} added. Open a meeting there and refresh the tab.`;
+}); });
 element("setup").addEventListener("click", () => { void run(async () => { await send("setup"); window.close(); }); });
 element("screenshot").addEventListener("click", () => { void run(async () => {
   const count = await send<number>("screenshot");
@@ -135,7 +175,7 @@ start.addEventListener("click", () => { void run(async () => {
   await saveSettings();
   applyState(await send<RecorderState>("start", { settings }));
   const count = tiles.filter(tile => tile.selected).length;
-  status.textContent = `Recording ${count} video file${count === 1 ? "" : "s"}${settings.includeSelf ? " plus your camera" : ""}. Keep Meet visible.`;
+  status.textContent = `Recording ${count} video file${count === 1 ? "" : "s"}${settings.includeSelf ? " plus your camera" : ""}. Keep the meeting visible.`;
 }); });
 stop.addEventListener("click", () => { void run(async () => {
   status.textContent = "Finalizing video and starting downloads…";
@@ -145,7 +185,7 @@ stop.addEventListener("click", () => { void run(async () => {
 }); });
 pause.addEventListener("click", () => { void run(async () => {
   applyState(await send<RecorderState>(current.phase === "paused" ? "resume" : "pause"));
-  status.textContent = current.phase === "paused" ? "Recording paused. Paused time is excluded from both files." : "Recording resumed. Keep Meet visible.";
+  status.textContent = current.phase === "paused" ? "Recording paused. Paused time is excluded from both files." : "Recording resumed. Keep the meeting visible.";
 }); });
 async function refreshLibrary() {
   const generation = ++libraryGeneration;
@@ -234,11 +274,13 @@ void (async () => {
   settings = normalizeSettings(stored.settings); includeSelf.checked = settings.includeSelf; qualitySelect.setValue(settings.quality); name.value = settings.name;
   saveFolder.value = settings.saveFolder; askWhereToSave.checked = settings.askWhereToSave; renderSavePath();
   if (stored.deviceLabels) element("deviceSummary").textContent = `${stored.deviceLabels.camera || "Default camera"} · ${stored.deviceLabels.microphone || "Default microphone"}`;
+  try { userSites = (await send<{ sites: string[] }>("sites")).sites; } catch { /* the list is additive; failing to read it must not block recording */ }
+  renderSites();
   applyState(await send<RecorderState>("status"));
   try { await refreshTiles(); }
   catch (error) { status.textContent = errorMessage(error); }
   if (hasSelection()) status.textContent = "Check devices, then start when ready.";
-  else if (!warning.textContent) status.textContent = "Open Meet; toggle on the participants or screen shares to record.";
+  else if (!warning.textContent) status.textContent = "Open your meeting; toggle on the participants or screen shares to record.";
   if (current.phase !== "idle") status.textContent = "A recording is active. Use the controls above to pause or stop.";
   initialized = true; render();
   await refreshLibrary();

@@ -97,7 +97,7 @@ async function acquire(constraints: MediaStreamConstraints, source = "devices"):
     streams.push(stream);
     return stream;
   } catch (error) {
-    if (source === "tab") throw new Error(`Could not capture the Meet tab: ${error instanceof Error ? `${error.name}: ${error.message}` : String(error)}. Return to Meet, click the GMRec toolbar icon, and try again.`);
+    if (source === "tab") throw new Error(`Could not capture the meeting tab: ${error instanceof Error ? `${error.name}: ${error.message}` : String(error)}. Return to the meeting, click the GMRec toolbar icon, and try again.`);
     throw error;
   } finally { window.clearTimeout(timer); }
 }
@@ -185,7 +185,7 @@ async function createOutput(stream: MediaStream, kind: string, config: Recording
 // -> 640x360 -> 960x540. A WebM whose frames change size while its header declares one size
 // plays back at the wrong aspect and flashes black in stricter players such as VLC. Drawing
 // every frame into one fixed-size canvas gives the file exactly one resolution end to end.
-// The same pass reproduces Meet's mirroring, which keeps all canvas work out of the Meet tab.
+// The same pass reproduces the page's mirroring, which keeps all canvas work out of that tab.
 function normalizeTrack(track: MediaStreamTrack, width: number, height: number, fps: number, mirrored: boolean): Normalized {
   const canvas = document.createElement("canvas");
   canvas.width = width; canvas.height = height;

@@ -1,4 +1,5 @@
 import type { DetectedTile, RecorderState, Selection, TileKind, TileSignal } from "./types";
+import { type Adapter, adapterFor, deepClosest, deepLeaves, deepQueryAll, deepText, deepVideos } from "./adapters";
 import { errorMessage, fitRect, formatTime, meetingFolder, safeName } from "./shared";
 
 // executeScript may be used after an extension update; never attach duplicate listeners.
@@ -119,6 +120,32 @@ function makeDraggable(handle: HTMLElement, host: HTMLDivElement, storageKey: st
   }).catch(() => {});
 }
 
+// Which product this page is. Re-resolved until something more specific than the generic
+// adapter matches, because a single-page app often mounts its call UI well after load.
+let adapter: Adapter = adapterFor(location.href);
+function refreshAdapter() {
+  if (adapter.id !== "generic") return;
+  const next = adapterFor(location.href);
+  if (next.id !== adapter.id) adapter = next;
+}
+// The tile element wrapping one participant. An adapter names the conventions it knows about;
+// otherwise the highest ancestor that still holds exactly this one video is the tile, which is
+// what a tile is on any site whether or not it advertises the fact.
+function containerOf(video: HTMLVideoElement): Element | null {
+  for (const selector of adapter.containers) {
+    const hit = deepClosest(video, selector);
+    if (hit) return hit;
+  }
+  let best: Element | null = video.parentElement;
+  let current: Element | null = video.parentElement;
+  for (let depth = 0; depth < 6 && current; depth++) {
+    if (deepVideos(current).length !== 1) break;
+    best = current;
+    const root = current.parentElement ?? (current.getRootNode() instanceof ShadowRoot ? (current.getRootNode() as ShadowRoot).host : null);
+    current = root;
+  }
+  return best;
+}
 function videoTrackOf(video: HTMLVideoElement): MediaStreamTrack | undefined {
   const source = video.srcObject;
   return source instanceof MediaStream ? source.getVideoTracks().find(track => track.readyState === "live") : undefined;
@@ -128,9 +155,12 @@ function videoTrackOf(video: HTMLVideoElement): MediaStreamTrack | undefined {
 function audioTrackOf(video: HTMLVideoElement): MediaStreamTrack | undefined {
   const own = video.srcObject instanceof MediaStream ? video.srcObject.getAudioTracks().find(track => track.readyState === "live") : undefined;
   if (own) return own;
-  const container = video.closest("[data-participant-id]");
+  const container = containerOf(video);
   const id = container?.getAttribute("data-participant-id");
-  for (const element of Array.from(document.querySelectorAll("audio"))) {
+  // A tile that carries its own <audio> is the best case; otherwise fall back to a document-wide
+  // element paired by participant id, which is how Meet lays it out.
+  const inTile = container ? deepQueryAll(container, "audio") : [];
+  for (const element of [...inTile, ...deepQueryAll(document, "audio")] as HTMLAudioElement[]) {
     const source = element.srcObject;
     if (!(source instanceof MediaStream)) continue;
     const track = source.getAudioTracks().find(track => track.readyState === "live");
@@ -174,7 +204,7 @@ function isLocalTrack(track: MediaStreamTrack | undefined): boolean {
 }
 function detectKind(video: HTMLVideoElement): TileKind {
   if (videoTrackOf(video)?.getSettings().displaySurface) return "screen";
-  const container = video.closest("[data-participant-id]") ?? video.parentElement;
+  const container = containerOf(video);
   const labels = container ? tileLabels(container) : [];
   const own = video.getAttribute("aria-label");
   if (own) labels.push(own);
@@ -214,17 +244,18 @@ function tileLabels(container: Element): string[] {
   const labels: string[] = [];
   const own = container.getAttribute("aria-label");
   if (own) labels.push(own);
-  for (const node of Array.from(container.querySelectorAll("[aria-label], [data-tooltip]"))) {
-    const label = node.getAttribute("aria-label") ?? node.getAttribute("data-tooltip");
+  for (const node of deepQueryAll(container, "[aria-label], [data-tooltip], [title]")) {
+    const label = node.getAttribute("aria-label") ?? node.getAttribute("data-tooltip") ?? node.getAttribute("title");
     if (label) labels.push(label);
   }
   return labels;
 }
-function nameFromTile(video: HTMLVideoElement): string | null {
-  const container = video.closest("[data-participant-id]") ?? video.parentElement;
+function nameFromTile(video: HTMLVideoElement, kind: TileKind): string | null {
+  const container = containerOf(video);
   if (!container) return null;
-  const selfName = (container.closest("[data-self-name]") as HTMLElement | null)?.getAttribute("data-self-name");
-  if (selfName?.trim()) return selfName.trim();
+  // Whatever this particular product exposes directly beats any amount of scraping.
+  const hint = adapter.nameHints?.({ video, container, kind })?.trim();
+  if (hint && plausibleName(hint)) return hint;
   // Most specific pattern first, across every control label in the tile.
   const labels = tileLabels(container);
   for (const pattern of NAME_FROM_LABEL) {
@@ -233,11 +264,11 @@ function nameFromTile(video: HTMLVideoElement): string | null {
       if (name && plausibleName(name)) return name;
     }
   }
-  // Otherwise the visible name chip, ignoring anything that belongs to a control.
-  for (const node of Array.from(container.querySelectorAll<HTMLElement>("div, span"))) {
-    if (node.childElementCount) continue;
+  // Otherwise the visible name chip, ignoring anything that belongs to a control. Shadow roots
+  // are walked too: on a web-component product the name tag is only ever inside one.
+  for (const node of deepLeaves(container)) {
     if (node.closest("button, [role='button'], [role='menuitem'], [aria-label], [data-tooltip]")) continue;
-    const text = node.textContent?.trim() ?? "";
+    const text = deepText(node);
     if (plausibleName(text)) return text;
   }
   // A bare aria-label with no recognisable pattern is a last resort, and only if it reads like
@@ -247,28 +278,48 @@ function nameFromTile(video: HTMLVideoElement): string | null {
 }
 const NUMBERED_LABEL = /^(Participant|Screen share) \d+$/;
 function resolveLabel(entry: Tracked): string {
-  const name = nameFromTile(entry.video);
+  const name = nameFromTile(entry.video, entry.kind);
   if (entry.kind === "screen") {
     if (!name) return `Screen share ${entry.ordinal}`;
     // Meet's own label often already says "… is presenting"; don't tack "screen" onto that.
     return /present|screen|shar/i.test(name) ? name : `${name} (screen)`;
   }
   if (name) return name;
-  // Meet mirrors only your own camera, so a mirrored tile is a reliable self-view signal even
-  // when the track carries no groupId (Meet's effects pipeline strips it).
+  // A product mirrors only your own camera, so a mirrored tile is a reliable self-view signal
+  // even when the track carries no groupId (Meet's effects pipeline strips it).
   return entry.mirrored || isLocalTrack(videoTrackOf(entry.video)) ? "Your self view" : `Participant ${entry.ordinal}`;
 }
 // Cached: resolveLabel walks the tile's subtree, and this is read on every preview frame.
 function labelFor(entry: Tracked): string { return entry.label; }
 // Identity that survives Meet replacing the element, which it does whenever a camera is toggled
 // or switched. Without this the same person is rediscovered as a new tile every time.
+// Attributes products use to mark who a tile belongs to. Checked on the tile and its ancestors.
+const ID_ATTRIBUTES = ["data-participant-id", "data-participant", "data-peer-id", "data-user-id", "data-member-id", "data-session-id"];
+function participantIdOf(video: HTMLVideoElement, kind: TileKind): string | null {
+  const container = containerOf(video);
+  const fromAdapter = adapter.stableId?.({ video, container, kind });
+  if (fromAdapter) return fromAdapter;
+  for (const attribute of ID_ATTRIBUTES) {
+    const value = deepClosest(video, `[${attribute}]`)?.getAttribute(attribute);
+    if (value) return value;
+  }
+  return null;
+}
 function tileKey(video: HTMLVideoElement, kind: TileKind): string | null {
-  const participant = video.closest("[data-participant-id]")?.getAttribute("data-participant-id");
-  return participant ? `${participant}|${kind}` : null;
+  const participant = participantIdOf(video, kind);
+  if (participant) return `${participant}|${kind}`;
+  // No id attribute: a product built from web components keeps the participant object as a JS
+  // property, which lives in the page's world and is invisible here. The rendered name is the
+  // next most stable thing about a person, and it survives the element being replaced.
+  const name = nameFromTile(video, kind);
+  if (name) return `name:${name}|${kind}`;
+  // Last resort. A MediaStream id is stable while the stream lasts, so it still prevents the
+  // same tile being rediscovered on every 500ms scan — it just cannot follow a camera swap.
+  const stream = video.srcObject;
+  return stream instanceof MediaStream && stream.id ? `stream:${stream.id}|${kind}` : null;
 }
 function newId(video: HTMLVideoElement): string {
-  const pid = video.closest("[data-participant-id]")?.getAttribute("data-participant-id");
-  return `${pid || "tile"}-${++idCounter}`;
+  return `${participantIdOf(video, "camera") || "tile"}-${++idCounter}`;
 }
 function getDetectedTiles(): DetectedTile[] {
   return Array.from(tracked.values(), entry => ({ id: entry.id, label: labelFor(entry), kind: entry.kind, selected: entry.selected }));
@@ -513,6 +564,9 @@ function drawOverlay(now: number) {
 // Meet only spotlights one tile at a time, so pinning a second selected tile un-pins the first.
 function attemptPin(entry: Tracked) {
   entry.pinnedByUs = false;
+  // Only where double-click is known to spotlight a tile. On another product the same gesture
+  // could mean anything, so GMRec records what the page already sends rather than poking it.
+  if (!adapter.spotlight) return;
   try {
     const rect = entry.video.getBoundingClientRect();
     if (rect.width * rect.height > innerWidth * innerHeight * 0.55) return; // Already large; avoid toggling off a manual pin.
@@ -524,7 +578,7 @@ function attemptPin(entry: Tracked) {
   } catch { /* Meet's DOM can change at any time; pinning is a quality aid, never required. */ }
 }
 function attemptUnpin(entry: Tracked) {
-  if (!entry.pinnedByUs) return;
+  if (!entry.pinnedByUs || !adapter.spotlight) return;
   entry.pinnedByUs = false;
   try {
     if (!entry.video.isConnected) return;
@@ -682,7 +736,8 @@ function promptForScreenShare(entry: Tracked) {
 }
 function scan() {
   const current = new Set<HTMLVideoElement>();
-  for (const video of Array.from(document.querySelectorAll("video"))) {
+  refreshAdapter();
+  for (const video of deepVideos()) {
     if (!video.isConnected) continue;
     current.add(video);
     const existing = tracked.get(video);

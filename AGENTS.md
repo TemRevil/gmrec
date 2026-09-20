@@ -10,9 +10,13 @@ several obvious-looking improvements have already been tried and measurably made
 
 ## What this project is
 
-A Manifest V3 Chrome extension that records each Google Meet participant into a separate MP4, by
+A Manifest V3 Chrome extension that records each meeting participant into a separate MP4, by
 cloning their real WebRTC `MediaStreamTrack` — not by capturing pixels. There is no backend, no
 build server, and no network access at runtime.
+
+It ships adapters for Google Meet and ADPList (which runs on Dyte), plus a generic adapter that
+is expected to work on any WebRTC site the user adds. Site-specific knowledge belongs in
+`src/adapters.ts` and nowhere else.
 
 ## Getting oriented
 
@@ -43,11 +47,13 @@ GMREC_CHROMIUM_PATH="/c/Program Files/Google/Chrome/Application/chrome.exe" npm 
 | `src/setup.ts` / `setup.html` | Device permission and preview page |
 | `src/onboarding.ts` / `onboarding.html` | First-run walkthrough |
 | `src/client.ts` | Shared UI helpers: messaging, custom select, theme |
-| `src/shared.ts` | Pure functions: validation, sanitizing, folder naming. **The unit tests target this** |
+| `src/adapters.ts` | Per-site knowledge and the shadow-DOM walkers. **The only file that may name a product** |
+| `src/shared.ts` | Pure functions: validation, sanitizing, folder naming, site matching. **The unit tests target this** |
 | `src/storage.ts` | IndexedDB chunk store |
 | `src/types.ts` | All shared types |
 | `tests/unit.test.mjs` | Node `--test`; transpiles TS in-process, stubs `chrome` |
 | `tests/browser-smoke.mjs` | Playwright, synthetic Meet fixture, real encode/decode, file inspection |
+| `tests/sites-smoke.mjs` | Playwright, synthetic Dyte and plain fixtures: shadow-DOM discovery, naming, site gating |
 
 ### Data flow
 
@@ -131,7 +137,28 @@ URL is on `meet.google.com`, and — for anything touching a live recording — 
 the sender's tab. Signals relayed *into* a tab must come from `recorder.html`. Download paths go
 through `safeDownloadPath()`. Do not relax these to make a feature simpler.
 
-### 12. Downloads cannot leave the Downloads folder
+### 12. Tile discovery must pierce shadow roots
+
+`document.querySelectorAll("video")` does not descend into shadow roots, and web-component
+products render every tile inside one — ADPList runs on Dyte, whose Stencil components all use
+open shadow DOM, so a plain query finds **zero** tiles there. Use `deepVideos`, `deepQueryAll`,
+`deepClosest`, `deepLeaves` and `deepText` from `src/adapters.ts`. Each walker also descends the
+root's *own* shadow root: when the root is a custom-element host, everything is in there and
+`querySelectorAll` on the host returns nothing. `textContent` likewise stops at a shadow boundary
+and comes back empty — `deepText` is what reads a name tag.
+
+### 13. Only Google Meet gets double-clicked
+
+Spotlighting a tile is a Meet behaviour, gated behind `adapter.spotlight`. On another product the
+same gesture could mean anything, so GMRec records what the page already sends.
+
+### 14. A site is authorised by origin, not by frame index
+
+`siteAllowed()` gates both the popup's start path and every content-script message. Built-in
+sites come from the manifest; user-added ones hold an optional host permission and are registered
+at runtime from what Chrome actually granted, never from what is merely stored.
+
+### 15. Downloads cannot leave the Downloads folder
 
 `chrome.downloads.download({ filename })` is always relative to the browser's download directory.
 The only escape is `saveAs: true`, which is exposed as the **Ask where to save each file**
@@ -149,6 +176,8 @@ setting. Do not claim or attempt arbitrary filesystem paths.
 | Resolve the loopback on the first `ontrack` | Fires for audio first; the video track was lost |
 | Embed title/author tags in the MP4 | `MediaRecorder` writes no `udta`/`meta` box and exposes no API. Hence the JSON sidecar |
 | Full-resolution `getImageData` sampling in tests | Distorted the measured fps — a test artifact, not a product bug |
+| `all_frames: true` for iframe-hosted calls | Duplicates every overlay, and the products targeted so far render in the top document. Left off until a real case needs it |
+| Reading Dyte's `participant` property off the tile element | It lives in the page's JS world; a content script cannot see it. The rendered name tag is the readable source |
 
 ---
 

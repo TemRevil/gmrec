@@ -8,14 +8,15 @@
     "typecheck": "tsc --noEmit",
     "dev": "node esbuild.mjs --watch",
     "test": "node --test tests/*.test.mjs",
-    "test:browser": "node tests/browser-smoke.mjs"
+    "test:browser": "node tests/browser-smoke.mjs",
+    "test:sites": "node tests/sites-smoke.mjs"
   },
   "devDependencies": {
     "@types/chrome": "^0.0.268",
     "esbuild": "^0.24.0",
     "typescript": "^5.7.2"
   },
-  "description": "Chrome extension that records each Google Meet participant into their own MP4, from their real stream.",
+  "description": "Chrome extension that records each meeting participant into their own MP4, from their real stream.",
   "license": "MIT",
   "author": "TemRevil <temrevil@gmail.com>",
   "repository": {

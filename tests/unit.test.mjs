@@ -7,7 +7,7 @@ import ts from "typescript";
 function load(name, globals = {}, imports = {}) {
   const code = ts.transpileModule(readFileSync(new URL(`../src/${name}.ts`, import.meta.url), "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
   const exports = {};
-  vm.runInNewContext(code, { exports, require: name => imports[name], console, ...globals }, { filename: `${name}.ts` });
+  vm.runInNewContext(code, { exports, require: name => imports[name], console, URL, ...globals }, { filename: `${name}.ts` });
   return exports;
 }
 const shared = load("shared");
@@ -71,6 +71,39 @@ test("settings carry a save location and a Save-as preference", () => {
   assert.equal(values.askWhereToSave, false, "only a real boolean true turns on the Save-as dialog");
   assert.equal(shared.normalizeSettings({ askWhereToSave: true }).askWhereToSave, true);
 });
+test("recordable sites are the built-in ones plus whatever the user added", () => {
+  assert.equal(shared.siteAllowed("https://meet.google.com/abc-defg-hij"), true);
+  assert.equal(shared.siteAllowed("https://adplist.org/meeting?id=1"), true, "ADPList runs its own sessions on Dyte");
+  assert.equal(shared.siteAllowed("https://www.adplist.org/meeting"), true, "subdomains count");
+  assert.equal(shared.siteAllowed("https://evil.com/meet.google.com"), false, "a path is never a host");
+  assert.equal(shared.siteAllowed("https://notadplist.org/meeting"), false);
+  assert.equal(shared.siteAllowed("https://app.example.com/room/1"), false, "unknown until the user adds it");
+  assert.equal(shared.siteAllowed("https://app.example.com/room/1", ["https://app.example.com"]), true);
+  // A user-added site authorises its own origin only, never a sibling or the parent domain.
+  assert.equal(shared.siteAllowed("https://other.example.com/room", ["https://app.example.com"]), false);
+  assert.equal(shared.siteAllowed("http://app.example.com/room", ["https://app.example.com"]), false, "scheme is part of the origin");
+  // Nothing that is not a web page can ever be recorded, whatever is stored.
+  for (const url of ["chrome://settings", "chrome-extension://abc/popup.html", "file:///c/x.html", "", undefined])
+    assert.equal(shared.siteAllowed(url, ["https://app.example.com"]), false, String(url));
+});
+test("a typed site becomes a bare origin", () => {
+  assert.equal(shared.normalizeSite("app.example.com"), "https://app.example.com");
+  assert.equal(shared.normalizeSite("https://app.example.com/room/42?x=1"), "https://app.example.com", "a pasted meeting link keeps only its origin");
+  assert.equal(shared.normalizeSite("  https://a.io:8443/x  "), "https://a.io:8443", "a port is part of the origin");
+  assert.equal(shared.normalizeSite("javascript:alert(1)"), "");
+  assert.equal(shared.normalizeSite(""), "");
+  assert.deepEqual([...shared.normalizeSites(["a.io", "https://a.io/x", "", 7, "b.io"])], ["https://a.io", "https://b.io"], "deduplicated, junk dropped");
+  assert.equal(shared.normalizeSites("not an array").length, 0);
+  assert.equal(shared.normalizeSites(Array.from({ length: 80 }, (_, i) => `s${i}.io`)).length, 50, "the list is capped");
+});
+test("folders are named for the meeting on any site, not only Meet", () => {
+  const when = new Date(2026, 8, 19, 17, 5);
+  assert.equal(shared.meetingFolder("Mentorship with Aya – ADPList", "https://adplist.org/meeting", when), "GMRec/Mentorship-with-Aya-2026-09-19-1705");
+  // No usable title: the path segment identifies the room, exactly as a Meet code does.
+  assert.equal(shared.meetingFolder("ADPList", "https://adplist.org/meeting", when), "GMRec/meeting-2026-09-19-1705");
+  // No title and no room in the path: the site itself is still better than "meeting".
+  assert.equal(shared.meetingFolder("", "https://app.example.com/a/b/c", when), "GMRec/app-example-com-2026-09-19-1705");
+});
 test("download paths must stay inside the downloads folder", () => {
   assert.equal(shared.safeDownloadPath("GMRec/meeting-2026-09-19-1705/clip.webm"), true);
   assert.equal(shared.safeDownloadPath("../escape.webm"), false);
@@ -94,6 +127,7 @@ function workerEnvironment() {
   let hasRecorder = false;
   let failStart = false;
   let activeTab = { id: 7, url: "https://meet.google.com/abc-defg-hij" };
+  let userSites = [];
   const chrome = {
     runtime: { id: "test", ContextType: { OFFSCREEN_DOCUMENT: "OFFSCREEN_DOCUMENT" }, getURL: file => `chrome-extension://test/${file}`, getContexts: async () => hasRecorder ? [{}] : [], onMessage: event(), onInstalled: event(), sendMessage: async message => {
       calls.push(message);
@@ -106,12 +140,16 @@ function workerEnvironment() {
       return { ok: true, data: state };
     } },
     tabs: { query: async () => [activeTab], sendMessage: async (_id, message) => { toContent.push(message); return message.type === "selection" ? selection : null; }, onRemoved: event(), onUpdated: event() },
-    scripting: { executeScript: async () => {} },
+    scripting: { executeScript: async () => {}, getRegisteredContentScripts: async () => [], registerContentScripts: async () => {}, unregisterContentScripts: async () => {} },
     offscreen: { Reason: { USER_MEDIA: "USER_MEDIA", BLOBS: "BLOBS" }, createDocument: async () => { hasRecorder = true; } },
     tabCapture: { getMediaStreamId: (_options, cb) => cb("test-stream") },
     action: { setBadgeText: async () => {}, setBadgeBackgroundColor: async () => {} },
     downloads: { onChanged: event() },
-    storage: { session: { get: async () => ({}), set: async () => {}, remove: async () => {} } },
+    storage: {
+      session: { get: async () => ({}), set: async () => {}, remove: async () => {} },
+      local: { get: async () => ({ sites: userSites }), set: async values => { if (values.sites) userSites = values.sites; } },
+    },
+    permissions: { contains: async () => true, onRemoved: event() },
   };
   function restart() {
     chrome.runtime.onMessage = event();

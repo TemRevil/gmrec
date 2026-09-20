@@ -23,20 +23,66 @@ function safeSegment(value: string): string {
 export function safeFolder(value: string | undefined): string {
   return String(value ?? "").split(/[\\/]+/).map(safeSegment).filter(Boolean).slice(0, 4).join("/") || "GMRec";
 }
+// Sites GMRec ships with, declared in the manifest. Anything else the user adds themselves,
+// which grants an optional host permission and registers the content script at runtime.
+export const BUILT_IN_SITES = [
+  { id: "meet", label: "Google Meet", host: /^meet\.google\.com$/i },
+  { id: "adplist", label: "ADPList", host: /(^|\.)adplist\.org$/i },
+];
+/** The origin of a URL, or "" when it is not an http(s) page GMRec could ever run on. */
+export function originOf(url: string | undefined): string {
+  try {
+    const parsed = new URL(url ?? "");
+    return parsed.protocol === "https:" || parsed.protocol === "http:" ? parsed.origin : "";
+  } catch { return ""; }
+}
+/** A user-added site, normalized to a bare origin so it can key a host permission. */
+export function normalizeSite(value: string): string {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  // Accept a pasted meeting URL or a bare hostname; both become just the origin.
+  return originOf(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`);
+}
+export function normalizeSites(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  for (const entry of value) {
+    const origin = normalizeSite(typeof entry === "string" ? entry : "");
+    if (origin) seen.add(origin);
+  }
+  return Array.from(seen).slice(0, 50);
+}
+/** Whether GMRec may record the page at this URL. */
+export function siteAllowed(url: string | undefined, extra: string[] = []): boolean {
+  const origin = originOf(url);
+  if (!origin) return false;
+  const host = new URL(origin).hostname;
+  if (BUILT_IN_SITES.some(site => site.host.test(host))) return true;
+  return extra.includes(origin);
+}
+export function siteLabel(url: string | undefined): string {
+  const origin = originOf(url);
+  if (!origin) return "this page";
+  const host = new URL(origin).hostname;
+  return BUILT_IN_SITES.find(site => site.host.test(host))?.label ?? host.replace(/^www\./i, "");
+}
 export function safeName(value: string): string {
   return String(value).replace(/[^\p{L}\p{N}_-]+/gu, "-").replace(/^-+|-+$/g, "").slice(0, 60) || "gmrec";
 }
 // One folder per meeting session, so a session's files land together instead of scattering
 // across Downloads. Two digits of clock time keep repeat meetings on the same day apart.
 export function meetingFolder(title: string | undefined, url: string | undefined, when: Date = new Date(), prefix = "", root = "GMRec"): string {
-  const code = /meet\.google\.com\/([a-z0-9-]+)/i.exec(url ?? "")?.[1];
+  // Google Meet puts the meeting code in the path; most other products put a room or session id
+  // there, which serves the same purpose when the tab title says nothing useful.
+  const code = /meet\.google\.com\/([a-z0-9-]+)/i.exec(url ?? "")?.[1]
+    ?? /^\/([A-Za-z0-9][A-Za-z0-9._-]{2,40})\/?$/.exec(new URL(originOf(url) ? url! : "https://x/").pathname)?.[1];
   const cleaned = (title ?? "")
     .replace(/^Meet\s*[–-]\s*/i, "")
-    .replace(/\s*[–-]\s*Google Meet\s*$/i, "")
+    .replace(/\s*[–|-]\s*(Google Meet|ADPList|Zoom|Microsoft Teams)\s*$/i, "")
     .trim();
-  // A bare "Meet" / "Google Meet" title carries no meeting name; prefer the meeting code.
-  const named = /^(google\s+)?meet$/i.test(cleaned) ? "" : cleaned;
-  const name = safeName(named || code || "meeting");
+  // A bare product name carries no meeting name; prefer the code, then the site.
+  const named = /^(google\s+)?meet$|^adplist$|^meeting$|^zoom$|^microsoft teams$/i.test(cleaned) ? "" : cleaned;
+  const name = safeName(named || code || (originOf(url) ? new URL(url!).hostname.replace(/^www\./i, "") : "") || "meeting");
   const pad = (value: number) => String(value).padStart(2, "0");
   const day = `${when.getFullYear()}-${pad(when.getMonth() + 1)}-${pad(when.getDate())}`;
   // The default prefix adds nothing to a folder that is already named for the meeting.
@@ -75,7 +121,7 @@ export function formatTime(ms: number): string {
 }
 export function errorMessage(error: unknown): string {
   if (error instanceof Error) {
-    if (error.name === "NotAllowedError") return "Camera or microphone permission was denied. Open Device setup, allow access, then return to Meet.";
+    if (error.name === "NotAllowedError") return "Camera or microphone permission was denied. Open Device setup, allow access, then return to your meeting.";
     if (error.name === "NotFoundError") return "A camera or microphone was not found. Check your devices or record the participant only.";
     if (error.name === "NotReadableError") return "A device could not be opened. Close other camera tests, check OS permissions, and try again.";
     if (error.name === "OverconstrainedError") return "The selected device is unavailable. Choose another device in setup.";

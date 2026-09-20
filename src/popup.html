@@ -31,7 +31,7 @@
           <button id="screenshot" class="btn btn-block"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3z"/><circle cx="12" cy="13" r="3.2"/></svg>Take screenshot</button>
         </div>
       </div>
-      <p class="help">Each ticked video is saved to its own file, straight from the stream Meet delivers. Tick or untick while recording to add or finish a file. A control bar on the Meet page does the same without opening this popup.</p>
+      <p class="help">Each ticked video is saved to its own file, straight from the stream Meet delivers. Tick or untick while recording to add or finish a file. A control bar on the meeting page does the same without opening this popup.</p>
     </section>
 
     <section id="panelSetup" role="tabpanel" aria-labelledby="tabSetup" tabindex="0" hidden>
@@ -43,6 +43,16 @@
         <p id="deviceSummary" class="help">Choose devices and allow access in Device setup.</p>
         <button id="setup" class="btn btn-block" style="margin-top:12px">Device setup</button>
       </div></div>
+
+      <div class="panel" style="margin-top:12px">
+        <div class="panel-body panel-bar"><span class="tag">Sites GMRec can record</span></div>
+        <div id="siteList" class="tile-list"></div>
+        <div class="panel-body">
+          <div class="field"><label for="siteInput">Add another site</label><input id="siteInput" maxlength="120" autocomplete="off" spellcheck="false" placeholder="app.example.com"></div>
+          <button id="addSite" class="btn btn-block" style="margin-top:10px">Allow this site</button>
+        </div>
+      </div>
+      <p class="help">Google Meet and ADPList work out of the box. For anything else, paste the meeting page's address — Chrome will ask permission for that site, and GMRec reads the participant tiles the same way. Names depend on what the site renders; where it exposes none, tiles are listed as Participant 1, 2, …</p>
 
       <div class="panel" style="margin-top:12px"><div class="panel-body">
         <div class="field"><label for="saveFolder">Save location</label><input id="saveFolder" maxlength="120" value="GMRec" autocomplete="off" spellcheck="false" placeholder="GMRec"></div>
@@ -58,7 +68,7 @@
         <div class="field"><label for="name">Folder name prefix</label><input id="name" maxlength="60" value="gmrec" autocomplete="off"></div>
         <div class="field"><label id="qualityLabel">Your camera resolution</label><div id="qualitySelect" aria-labelledby="qualityLabel"></div></div>
       </div></div>
-      <p class="help">Participants and screen shares are always saved at the quality Meet delivers, so this affects only your own camera file and the encoding bitrate. 720p is smoothest on most laptops.</p>
+      <p class="help">Participants and screen shares are always saved at the quality the meeting delivers, so this affects only your own camera file and the encoding bitrate. 720p is smoothest on most laptops.</p>
       <p class="help"><button id="howItWorks" class="text-button" type="button">How GMRec works</button></p>
     </section>
 

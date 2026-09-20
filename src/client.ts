@@ -2,7 +2,7 @@ import type { Reply } from "./types";
 
 export async function send<T>(type: string, payload: object = {}): Promise<T> {
   const reply: Reply<T> = await chrome.runtime.sendMessage({ target: "background", type, ...payload });
-  if (!reply?.ok) throw new Error(reply && !reply.ok ? reply.error : "GMRec did not respond. Reload the extension and Meet tab.");
+  if (!reply?.ok) throw new Error(reply && !reply.ok ? reply.error : "GMRec did not respond. Reload the extension and the meeting tab.");
   return reply.data;
 }
 export function element<T extends HTMLElement>(id: string): T {

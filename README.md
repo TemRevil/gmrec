@@ -1,7 +1,10 @@
 # GMRec
 
-A local Chrome extension that records a Google Meet call as **one clean video file per person** —
-each taken from the live stream Meet delivers, not from pixels on your screen.
+A local Chrome extension that records a video call as **one clean video file per person** — each
+taken from the live stream the meeting delivers, not from pixels on your screen.
+
+Works on **Google Meet** and **ADPList** out of the box, and on any other meeting site you add
+yourself.
 
 No server, no account, no upload. Everything stays on the machine it was recorded on.
 
@@ -61,8 +64,8 @@ works**.
 |---|---|
 | 1 | Get everyone's agreement to be recorded. |
 | 2 | **Setup → Device setup → Allow & test.** Pick your camera and microphone, check the preview, then **Stop preview & save choices**. Nothing is recorded here. |
-| 3 | Back in Meet, open GMRec. The **Record** tab lists every camera and screen share it can see. Tick the ones you want — each becomes its own file. |
-| 4 | Press **Start recording**, in the popup or on the control bar GMRec adds to the Meet page. |
+| 3 | Back in the meeting, open GMRec. The **Record** tab lists every camera and screen share it can see. Tick the ones you want — each becomes its own file. |
+| 4 | Press **Start recording**, in the popup or on the control bar GMRec adds to the meeting page. |
 | 5 | Press **Stop & save**. Check Chrome Downloads for the session folder. |
 
 Tiles can be ticked and unticked **while recording**: a new tick starts its own file from that
@@ -73,7 +76,7 @@ on-page prompt asks whether to add it.
 
 | File | Video | Audio |
 |---|---|---|
-| `<Name>.mp4` | That participant's camera, as Meet sends it | Their own voice when Meet exposes it separately, otherwise the meeting's shared audio |
+| `<Name>.mp4` | That participant's camera, as the site sends it | Their own voice when the site exposes it separately, otherwise the meeting's shared audio |
 | `<Name>-screen.mp4` | Their screen share | Same as above |
 | `self.mp4` | Your selected camera | Your selected microphone — and nothing else |
 | `meeting-audio.m4a` | — | The whole meeting, as a single backup track |
@@ -81,6 +84,26 @@ on-page prompt asks whether to add it.
 
 Your microphone is deliberately kept out of other people's files, and is never played back
 through your speakers.
+
+---
+
+## Supported sites
+
+| Site | How tiles are found | Names |
+|---|---|---|
+| **Google Meet** | `[data-participant-id]` tiles | From Meet's own control labels (`Pin <Name>`, `<Name> is presenting`) |
+| **ADPList** | Its sessions run on [Dyte](https://dyte.io), whose UI Kit renders every tile inside an **open shadow root** — a plain `querySelectorAll("video")` finds nothing there | From the rendered `<dyte-name-tag>` |
+| **Anything else you add** | The tile is the nearest ancestor holding exactly that one video, shadow roots included | Control labels, then the visible name chip; `Participant 1, 2, …` when the site renders no name |
+
+Add a site under **Setup → Sites GMRec can record**: paste the meeting page's address and Chrome
+asks permission for that origin. Permission is per-origin — allowing `app.example.com` does not
+allow anything else — and removing the site revokes it.
+
+An ADPList booking can also be a Google Meet, Zoom or Teams link rather than an ADPList session;
+in that case it is that product's tab you record, with that product's adapter.
+
+**Known limitation:** the call must render in the tab's own document. A call embedded from another
+origin in an iframe is not reached yet.
 
 ---
 
@@ -159,7 +182,8 @@ periodically on long calls.
 | Permission denied | Open Device setup in its own tab; allow camera and microphone in that page's site controls **and** in your OS privacy settings. |
 | Device unavailable | Reconnect it, or pick an available one and stop the preview. Some camera drivers refuse to be shared between Meet and another capture — participant-only mode still works. |
 | No selectable video | The picker needs a *playing* video, not an avatar or an empty tile. Turn the camera on and keep the tile visible. |
-| Hidden-tile warning | Return to Meet, pin the participant, and reselect if Meet swapped their video element. |
+| Hidden-tile warning | Return to the meeting, pin the participant, and reselect if the page swapped their video element. |
+| No tiles on a supported site | The call may be in an embedded frame from another origin, which GMRec does not reach yet. Open the call in its own tab if the site offers that. |
 | Download missing | Check Chrome Downloads for a prompt or interruption, then use **Files → Download copy**. |
 | Recording is slow | Choose 720p and close other video workloads. Confirm files play before a long session. |
 | File reports infinite duration | That is a WebM fallback file. Convert it with `tools/convert-webm.ps1` (needs FFmpeg with H.264/AAC on PATH). |
@@ -202,8 +226,9 @@ Design rationale is in **[PRODUCT.md](PRODUCT.md)** and **[DESIGN.md](DESIGN.md)
 |---|---|
 | `npm run dev` | Watch TypeScript and static assets |
 | `npm run typecheck` | `tsc --noEmit` |
-| `npm test` | 16 dependency-free unit tests |
-| `npm run test:browser` | Full integration suite in a real Chrome |
+| `npm test` | 19 dependency-free unit tests |
+| `npm run test:browser` | Full Google Meet integration suite in a real Chrome |
+| `npm run test:sites` | Site adapters: shadow-DOM tiles, generic naming, site gating |
 | `npm run build` | Produce `dist/` |
 
 The browser suite needs Playwright and a recent Chrome. Point `GMREC_CHROMIUM_PATH` at the
