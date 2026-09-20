@@ -155,9 +155,22 @@ exposes (the same labels names are read from, so they are known to be in the DOM
 hovering). It is gated behind `adapter.spotlight`, set only where a pin control is known to exist
 and to mean this.
 
-Two rules that follow: a tile showing an **Unpin** control is already pinned, so pressing Pin
-would toggle it *off* — leave it alone. And `pinnedByUs` is set only after the control actually
-flipped, so stopping never releases a pin the user set themselves.
+Three rules follow:
+
+1. **Confirm the flip asynchronously.** The click only asks; the product updates its state and
+   re-renders afterwards, so the control has *not* flipped in the same tick. Claiming the pin
+   synchronously left `pinnedByUs` false on real Meet, which meant the pin was never released.
+   `confirmPin` re-checks on a timer instead.
+2. **Never take a pin that is already taken.** Meet spotlights one tile at a time, so pinning
+   anything drops whatever is pinned now — including a tile the user pinned themselves, or a
+   different tile GMRec is recording. `somethingIsPinned()` checks the whole document, not just
+   the target tile.
+3. **Pick the control that matches the tile.** A presenting participant's tile carries both
+   `Pin Ada` and `Pin Ada's presentation`; first-in-DOM-order pins the wrong one.
+
+The fixture flips its label on a timer **on purpose**. Flipping it synchronously is what hid
+rule 1: the test passed while the feature was broken in Meet. If you touch this, re-break the
+code and confirm the suite fails.
 
 ### 14. A site is authorised by origin, not by frame index
 

@@ -19,7 +19,9 @@ export type Adapter = {
   nameHints?: (ctx: TileContext) => string | null;
   /** A stable per-participant id, when the site exposes one. */
   stableId?: (ctx: TileContext) => string | null;
-  /** Whether double-clicking a tile spotlights it, which makes the site send more detail. */
+  /** Whether this product has a Pin control, labelled `Pin …` / `Unpin …`, that makes it send
+   *  more detail for that tile. Pressing that control is the only mechanism used — a synthetic
+   *  double-click on a tile does nothing, so do not set this by testing one. */
   spotlight: boolean;
 };
 
@@ -100,7 +102,8 @@ const meet: Adapter = {
     return self?.getAttribute("data-self-name")?.trim() || null;
   },
   stableId: ({ container }) => container?.getAttribute("data-participant-id") ?? null,
-  // Meet sends a higher-quality stream for a tile it considers prominent, and double-click pins.
+  // Meet sends a higher-quality stream for a tile it considers prominent, and exposes a real
+  // Pin control on every tile.
   spotlight: true,
 };
 

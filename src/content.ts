@@ -567,14 +567,38 @@ function drawOverlay(now: number) {
 // from, so they are known to be present without hovering first.
 const PIN_LABEL = /^pin\b/i;
 const UNPIN_LABEL = /^(unpin\b|remove from screen\b)/i;
+const PRESENTATION_LABEL = /presentation|presenting|screen\s*shar/i;
+const PIN_CONTROLS = "button, [role='button'], [role='menuitem']";
+function labelOf(node: Element): string {
+  return (node.getAttribute("aria-label") ?? node.getAttribute("data-tooltip") ?? node.getAttribute("title") ?? "").trim();
+}
+// A presenting participant's tile carries controls for both their camera and their presentation
+// ("Pin Ada", "Pin Ada's presentation"), so taking the first match in DOM order can pin the wrong
+// one — and can make the already-pinned check below veto a camera tile because the presentation
+// is pinned. Prefer the control that talks about what this tile actually is.
 function pinControl(entry: Tracked, pattern: RegExp): HTMLElement | null {
   const container = containerOf(entry.video);
   if (!container) return null;
-  for (const node of deepQueryAll(container, "button, [role='button'], [role='menuitem']")) {
-    const label = (node.getAttribute("aria-label") ?? node.getAttribute("data-tooltip") ?? node.getAttribute("title") ?? "").trim();
-    if (label && pattern.test(label)) return node as HTMLElement;
-  }
-  return null;
+  const matches = deepQueryAll(container, PIN_CONTROLS)
+    .map(node => ({ node: node as HTMLElement, label: labelOf(node) }))
+    .filter(hit => hit.label && pattern.test(hit.label));
+  const wantsPresentation = entry.kind === "screen";
+  return (matches.find(hit => PRESENTATION_LABEL.test(hit.label) === wantsPresentation) ?? matches[0])?.node ?? null;
+}
+// Meet spotlights one tile at a time, so pinning anything drops whatever is pinned now. If the
+// user has already pinned someone, that is their view and their choice of who gets the good
+// stream; quietly stealing it is worse than recording what Meet already sends.
+function somethingIsPinned(): boolean {
+  return deepQueryAll(document, PIN_CONTROLS).some(node => UNPIN_LABEL.test(labelOf(node)));
+}
+// The click only asks; the product updates its own state and re-renders afterwards, so the
+// control has NOT flipped yet in this tick. Claiming the pin synchronously left pinnedByUs false
+// on real Meet, which meant the pin was never released again.
+function confirmPin(entry: Tracked, attempt: number) {
+  if (!entry.selected || !entry.video.isConnected) return;
+  if (pinControl(entry, UNPIN_LABEL)) { entry.pinnedByUs = true; return; }
+  if (attempt >= 10) return; // ~1s; the click did not take, so no pin is claimed.
+  window.setTimeout(() => confirmPin(entry, attempt + 1), 100);
 }
 function attemptPin(entry: Tracked) {
   entry.pinnedByUs = false;
@@ -582,23 +606,26 @@ function attemptPin(entry: Tracked) {
   // the page already sends rather than pressing buttons it does not understand.
   if (!adapter.spotlight) return;
   try {
-    // An unpin control means this tile is already pinned, by the user or by us. Pressing pin
-    // again would toggle it off, and unpinning someone's manual choice is not ours to do.
-    if (pinControl(entry, UNPIN_LABEL)) return;
+    // An unpin control anywhere means a tile is already pinned — this one or someone else's.
+    // Either way pressing pin now would toggle a choice that is not ours to change.
+    if (somethingIsPinned()) return;
     const control = pinControl(entry, PIN_LABEL);
     if (!control) return;
     control.click();
-    // Only claim the pin if the control actually flipped, so stopping does not "unpin" a tile
-    // that was never pinned.
-    entry.pinnedByUs = !!pinControl(entry, UNPIN_LABEL);
+    confirmPin(entry, 0);
   } catch { /* Meet's DOM can change at any time; pinning is a quality aid, never required. */ }
 }
 function attemptUnpin(entry: Tracked) {
   if (!entry.pinnedByUs || !adapter.spotlight) return;
-  entry.pinnedByUs = false;
   try {
-    if (!entry.video.isConnected) return;
-    pinControl(entry, UNPIN_LABEL)?.click();
+    // Gone from the page: nothing left to release, and nothing left to own.
+    if (!entry.video.isConnected) { entry.pinnedByUs = false; return; }
+    const control = pinControl(entry, UNPIN_LABEL);
+    // Mid-re-render the control can be missing. Keep ownership so a later attempt can still
+    // give the pin back, rather than forgetting we took it.
+    if (!control) return;
+    control.click();
+    entry.pinnedByUs = false;
   } catch { /* best effort */ }
 }
 async function call(type: string, payload: object = {}): Promise<unknown> {

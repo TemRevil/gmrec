@@ -112,8 +112,12 @@ try {
   document.getElementById('tile').addEventListener('dblclick',()=>{window.__dblClicks++;});
   const pinBtn=document.querySelector('[aria-label="Pin Mohammed Ahmed"]');
   pinBtn.addEventListener('click',()=>{
-    if(pinBtn.getAttribute('aria-label').startsWith('Unpin')){window.__unpinClicks++;pinBtn.setAttribute('aria-label','Pin Mohammed Ahmed');}
-    else{window.__pinClicks++;pinBtn.setAttribute('aria-label','Unpin Mohammed Ahmed');}
+    const pinning=!pinBtn.getAttribute('aria-label').startsWith('Unpin');
+    if(pinning)window.__pinClicks++;else window.__unpinClicks++;
+    // Deliberately asynchronous: a real product updates its own state and re-renders after the
+    // click, so the label has not flipped yet when the handler returns. Flipping it synchronously
+    // here once hid a bug where the extension claimed the pin in the same tick and never could.
+    setTimeout(()=>pinBtn.setAttribute('aria-label',(pinning?'Unpin':'Pin')+' Mohammed Ahmed'),60);
   });
   const audio=new AudioContext();const tone=audio.createOscillator();tone.frequency.value=440;tone.connect(audio.destination);tone.start();audio.resume();
   </script></body></html>` }));
@@ -132,20 +136,26 @@ try {
   assert.equal(await selectTile(detected[0].id, true), true);
   // Selecting a tile presses Meet's own Pin control, which is what actually makes Meet send a
   // higher-quality stream. A synthetic double-click does nothing in Meet, so it must not be used.
-  assert.equal(await meet.evaluate(() => window.__pinClicks), 1, "selecting a tile must press Meet's Pin control");
-  assert.equal(await meet.evaluate(() => window.__dblClicks), 0, "no stray double-click: Meet ignores it and it can mean other things");
-  assert.equal(await meet.evaluate(() => document.querySelector('[aria-label^="Unpin Mohammed"]') !== null), true, "the tile should now read as pinned");
-  // Deselecting hands the tile back: GMRec releases only the pin it took.
+  const pinState = () => meet.evaluate(() => ({
+    pins: window.__pinClicks, unpins: window.__unpinClicks, dbl: window.__dblClicks,
+    pinned: !!document.querySelector('[aria-label^="Unpin Mohammed"]'),
+  }));
+  await poll(pinState, value => value.pinned, "selecting a tile presses Meet's Pin control");
+  assert.deepEqual({ ...await pinState() }, { pins: 1, unpins: 0, dbl: 0, pinned: true },
+    "exactly one Pin press, and no stray double-click: Meet ignores it and it can mean other things");
+  // Deselecting hands the tile back. The label flips a tick after the click, so the extension has
+  // to wait for it before claiming the pin — otherwise it never releases one.
   assert.equal(await selectTile(detected[0].id, false), true);
-  assert.equal(await meet.evaluate(() => window.__unpinClicks), 1, "deselecting should release the pin GMRec took");
-  assert.equal(await meet.evaluate(() => document.querySelector('[aria-label^="Pin Mohammed"]') !== null), true, "the tile should read as unpinned again");
+  const released = await poll(pinState, value => !value.pinned, "deselecting releases the pin GMRec took");
+  assert.deepEqual({ ...released }, { pins: 1, unpins: 1, dbl: 0, pinned: false });
   // A tile the user pinned themselves is left alone: pressing Pin again would toggle it OFF,
   // which is the opposite of what selecting it is meant to do.
   await meet.evaluate(() => document.querySelector('[aria-label^="Pin Mohammed"]').click());
-  const manualPins = await meet.evaluate(() => window.__pinClicks);
+  await poll(pinState, value => value.pinned, "manual pin applied");
   assert.equal(await selectTile(detected[0].id, true), true);
-  assert.equal(await meet.evaluate(() => window.__pinClicks), manualPins, "an already-pinned tile must not be toggled off by selecting it");
-  assert.equal(await meet.evaluate(() => window.__unpinClicks), 1, "and a pin the user set must not be released later");
+  await meet.waitForTimeout(400);
+  assert.deepEqual({ ...await pinState() }, { pins: 2, unpins: 1, dbl: 0, pinned: true },
+    "a tile that is already pinned must not be toggled, and that pin must not be released later");
   console.log("Tile auto-detection, toggle, and auto-pin passed");
 
   // Meet replaces the <video> element whenever a camera is toggled or switched. That must
