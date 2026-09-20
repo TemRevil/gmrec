@@ -588,66 +588,96 @@ function pinControl(entry: Tracked, pattern: RegExp): HTMLElement | null {
 function anythingIsPinned(): boolean {
   return deepQueryAll(document, PIN_CONTROLS).some(node => UNPIN_LABEL.test(labelOf(node)));
 }
-// Meet spotlights exactly one tile, so GMRec remembers exactly one thing: the id of the tile it
-// pinned, or nothing. Every other fact — whether that tile is still pinned, whether anything
-// else is — is read back off the page on each scan instead of being remembered.
+// Taking a pin is EDGE-TRIGGERED and one-shot: it happens because the user just selected a tile
+// or just started recording, never because a continuous loop decided the world looked wrong.
+// That asymmetry is the whole point. A loop that keeps restoring "the pin GMRec wants" fights
+// the user — unpin by hand and it pins straight back — and it cannot tell its own failed click
+// apart from a deliberate choice. Giving a pin back is the opposite: it is an obligation, so it
+// retries until the page confirms it, within a deadline.
 //
-// That is the whole design. Three rounds of review found bugs in the previous version, and every
-// one of them was remembered state drifting away from what the page actually showed: a pin
-// claimed before the click landed, a claim dropped while the pin stayed, two tiles both believing
-// they held the one pin Meet allows. State that is re-derived cannot drift.
+// Nothing here is a latch. Every piece of state is either the one pin we hold, or a task with an
+// expiry, so no failure can leave pinning switched off for the rest of the call.
 let ourPin: string | null = null;
+let pinTask: { id: string; want: "take" | "give-back"; until: number } | null = null;
 let pinCooldownUntil = 0;
-// Recording stopped: give the view back, without forgetting what is selected.
-let pinsSuspended = false;
-// Three answers, not two. A tile whose container cannot be resolved — detached mid-re-render,
-// or its id attribute not set yet — is unreadable, NOT unpinned. Collapsing those two is how a
-// claim gets dropped while Meet is still pinned, which strands the pin for the rest of the call.
+const PIN_TASK_MS = 6000;
+// Three answers, not two. A tile that cannot be read right now — detached mid-re-render, which
+// pinning itself provokes — is unreadable, NOT unpinned. Collapsing those two drops the claim
+// while Meet is still pinned, and the pin is stranded.
 function pinStateOf(entry: Tracked): "pinned" | "unpinned" | "unknown" {
-  if (!entry.video.isConnected || !containerOf(entry.video)) return "unknown";
+  if (!entry.video.isConnected) return "unknown";
+  const container = containerOf(entry.video);
+  // A container with no pin control either way is a half-built tile, not an unpinned one.
+  if (!container || !deepQueryAll(container, PIN_CONTROLS).some(node => PIN_LABEL.test(labelOf(node)) || UNPIN_LABEL.test(labelOf(node)))) return "unknown";
   return pinControl(entry, UNPIN_LABEL) ? "pinned" : "unpinned";
 }
-function pinnedEntry(): Tracked | undefined {
-  return ourPin ? Array.from(tracked.values()).find(entry => entry.id === ourPin) : undefined;
+function entryById(id: string | null): Tracked | undefined {
+  return id ? Array.from(tracked.values()).find(entry => entry.id === id) : undefined;
+}
+function wantPin(id: string | undefined) {
+  if (!adapter.spotlight || !id || ourPin) return;
+  pinTask = { id, want: "take", until: Date.now() + PIN_TASK_MS };
+}
+function wantPinBack(id: string | null = ourPin) {
+  if (!adapter.spotlight || !id || ourPin !== id) return;
+  pinTask = { id, want: "give-back", until: Date.now() + PIN_TASK_MS };
+}
+// The first selected tile that actually offers a Pin control: one tile still rendering must not
+// stop another selected tile from being pinned.
+function pinnableSelection(): Tracked | undefined {
+  return Array.from(tracked.values()).find(entry => entry.selected && pinControl(entry, PIN_LABEL));
 }
 function reconcilePins() {
   // Only where a pin control is known to exist and to mean this. Elsewhere GMRec records what
   // the page already sends rather than pressing buttons it does not understand.
-  if (!adapter.spotlight) return;
+  if (!adapter.spotlight || !pinTask) return;
   try {
     // Nothing is read while a click is still settling: the label has not flipped yet, and taking
     // that at face value would mean concluding our own pin never happened.
     if (Date.now() < pinCooldownUntil) return;
-    let owner = pinnedEntry();
-    // The pin we took is genuinely gone — the user moved it, or the tile left the call. The slot
-    // is free again, and there is nothing left to give back.
-    if (ourPin && (!owner || pinStateOf(owner) === "unpinned")) { ourPin = null; owner = undefined; }
-    // Give back a pin whose tile is no longer being recorded. ourPin stays set until the page
-    // confirms it is released, so a click that does not land is simply tried again.
-    if (ourPin && owner && (pinsSuspended || !owner.selected)) {
-      const control = pinControl(owner, UNPIN_LABEL);
+    if (Date.now() > pinTask.until) { pinTask = null; return; } // tried long enough
+    const entry = entryById(pinTask.id);
+    if (pinTask.want === "give-back") {
+      // The tile is gone, so there is no control left to press and nothing to give back.
+      if (!entry) { ourPin = null; pinTask = null; return; }
+      const state = pinStateOf(entry);
+      if (state === "unknown") return;                                  // try again next scan
+      if (state === "unpinned") { ourPin = null; pinTask = null; return; } // already released
+      const control = pinControl(entry, UNPIN_LABEL);
       if (!control) return;
       pinCooldownUntil = Date.now() + PIN_COOLDOWN_MS;
       control.click();
+      // Our obligation is discharged by asking. Holding the claim past this point is how a pin
+      // the user sets moments later gets adopted, and then taken away from them.
+      ourPin = null;
+      pinTask = null;
       return;
     }
-    // Take the slot for a selected tile, but only when nothing at all is pinned: an existing pin
-    // is the user's view of the call, and it is not ours to move.
-    if (ourPin || pinsSuspended || anythingIsPinned()) return;
-    const wanted = Array.from(tracked.values()).find(entry => entry.selected);
+    if (ourPin) { pinTask = null; return; }
+    // Never take a pin that exists: it is the user's view of the call, not ours to move.
+    if (anythingIsPinned()) { pinTask = null; return; }
+    const wanted = entry?.selected && pinControl(entry, PIN_LABEL) ? entry : pinnableSelection();
     const control = wanted && pinControl(wanted, PIN_LABEL);
     if (!wanted || !control) return;
     pinCooldownUntil = Date.now() + PIN_COOLDOWN_MS;
     control.click();
-    ourPin = wanted.id; // optimistic; the next reconcile corrects it if the click did nothing
-  } catch { /* Meet's DOM can change at any time; pinning is a quality aid, never required. */ }
+    ourPin = wanted.id;
+    pinTask = null;
+  } catch { pinTask = null; /* Meet's DOM changes constantly; pinning is a quality aid, never required. */ }
 }
 // Hand the pin back before this script goes away, or it is stranded: the replacement starts with
 // nothing tracked, so it reads the leftover pin as the user's and never pins again.
 function releasePinNow() {
-  const owner = pinnedEntry();
-  if (owner) try { pinControl(owner, UNPIN_LABEL)?.click(); } catch { /* best effort */ }
+  if (ourPin) try {
+    const owner = entryById(ourPin);
+    // Last resort when the tile itself can no longer be read: Meet allows one pin, so the single
+    // Unpin control on the page is necessarily the one we took.
+    const control = (owner && pinControl(owner, UNPIN_LABEL))
+      ?? deepQueryAll(document, PIN_CONTROLS).filter(node => UNPIN_LABEL.test(labelOf(node)))[0];
+    (control as HTMLElement | undefined)?.click();
+  } catch { /* best effort; nothing runs after this */ }
   ourPin = null;
+  pinTask = null;
 }
 async function call(type: string, payload: object = {}): Promise<unknown> {
   const reply = await chrome.runtime.sendMessage({ target: "background", type, ...payload });
@@ -755,11 +785,12 @@ function setSelected(id: string, on: boolean): boolean {
   if (!match || match.selected === on) return !!match;
   match.selected = on;
   if (on) {
-    pinsSuspended = false;
+    wantPin(match.id);
     reconcilePins();
     startOverlayLoop();
     if (active) void chrome.runtime.sendMessage({ target: "background", type: "add-tile", tile: { id: match.id, label: labelFor(match), kind: match.kind, mirrored: match.mirrored } }).catch(() => {});
   } else {
+    wantPinBack(match.id);
     reconcilePins();
     teardownTileOverlay(match);
     if (active) void chrome.runtime.sendMessage({ target: "background", type: "remove-tile", id }).catch(() => {});
@@ -844,12 +875,14 @@ function scan() {
     // A tile vanishing for good (someone leaving) must not end its file. The recorder keeps it
     // running until Stop.
     closeLoopback(entry.id);
+    // The tile is leaving, so this is the last chance to hand back a pin it holds.
+    if (ourPin === entry.id) releasePinNow();
     teardownTileOverlay(entry);
     tracked.delete(video);
   }
-  // Every scan, not just on select: this is what makes the pin self-correcting. A click that
-  // did not land, a pin the user moved, a tile that went away mid-flight — all of it is noticed
-  // here and put right, because the page is the source of truth rather than a remembered flag.
+  // Drives whatever pin task is outstanding. It never invents one: taking a pin happens only
+  // because the user selected a tile or started recording, so GMRec can never undo a pin the
+  // user removed on purpose.
   reconcilePins();
   syncLoopbackTracks();
 }
@@ -867,9 +900,15 @@ const listener: Parameters<typeof chrome.runtime.onMessage.addListener>[0] = (me
     barState = state; barReadAt = Date.now();
     renderControlBar();
     if (!active && wasActive) {
-      pinsSuspended = true;
+      wantPinBack();
       reconcilePins();
       for (const id of Array.from(loopbacks.keys())) closeLoopback(id);
+    }
+    // Starting is an edge too. Selection survives a stop, so without this every recording after
+    // the first would run unpinned: nothing would ever ask for the pin again.
+    if (active && !wasActive) {
+      wantPin(pinnableSelection()?.id);
+      reconcilePins();
     }
     respond(null);
     return;

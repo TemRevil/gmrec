@@ -120,6 +120,10 @@ interpret. It also never takes a pin that is already taken — so if you have pi
 yourself, or a screen share is on the main stage, nothing is auto-pinned and the tile records at
 whatever quality the meeting is already sending.
 
+GMRec pins when you tick a tile or press Start, and gives that pin back when you untick it or
+stop. It will not pin at any other moment: **if you unpin by hand mid-call, it stays unpinned**,
+even while the tile is still being recorded. Your view of the meeting is yours.
+
 **Known limitation:** the call must render in the tab's own document. A call embedded from
 another origin in an iframe is not reached yet.
 

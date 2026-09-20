@@ -136,9 +136,11 @@ try {
   assert.equal(await selectTile(detected[0].id, true), true);
   // Selecting a tile presses Meet's own Pin control, which is what actually makes Meet send a
   // higher-quality stream. A synthetic double-click does nothing in Meet, so it must not be used.
+  // Scoped to the camera tile: a second tile added later has controls of its own, and a
+  // document-wide selector would report that one's state as this one's.
   const pinState = () => meet.evaluate(() => ({
     pins: window.__pinClicks, unpins: window.__unpinClicks, dbl: window.__dblClicks,
-    pinned: !!document.querySelector('[aria-label^="Unpin Mohammed"]'),
+    pinned: !!document.querySelector('#tile [aria-label^="Unpin"]'),
   }));
   await poll(pinState, value => value.pinned, "selecting a tile presses Meet's Pin control");
   assert.deepEqual({ ...await pinState() }, { pins: 1, unpins: 0, dbl: 0, pinned: true },
@@ -170,26 +172,31 @@ try {
   const afterSwap = await poll(pinState, value => value.unpins === 2 && !value.pinned, "released even after the element was swapped");
   assert.deepEqual({ ...afterSwap }, { pins: 2, unpins: 2, dbl: 0, pinned: false });
 
-  // Unpinning by hand while the tile is still selected must be noticed and put right: the pin
-  // state is read back off the page, so a stale claim cannot survive.
+  // Unpinning by hand, while the tile is still selected, must STAY unpinned. GMRec takes a pin
+  // because the user selected a tile or started recording — never because a loop decided the
+  // page looked wrong. A loop cannot tell a failed click from a deliberate choice, so it would
+  // simply pin straight back and the user could never get their grid view back.
   assert.equal(await selectTile(detected[0].id, true), true);
-  await poll(pinState, value => value.pins === 3 && value.pinned, "pinned for the self-heal check");
+  await poll(pinState, value => value.pins === 3 && value.pinned, "pinned again");
   await meet.evaluate(() => document.querySelector('[aria-label^="Unpin Mohammed"]').click());
-  const healed = await poll(pinState, value => value.pins === 4 && value.pinned, "a pin taken away by hand is taken again");
-  assert.deepEqual({ ...healed }, { pins: 4, unpins: 3, dbl: 0, pinned: true });
-  assert.equal(await selectTile(detected[0].id, false), true);
-  await poll(pinState, value => value.unpins === 4 && !value.pinned, "and released again on deselect");
+  await poll(pinState, value => !value.pinned, "the manual unpin takes effect");
+  await meet.waitForTimeout(2500); // several scans and well past the cooldown
+  assert.deepEqual({ ...await pinState() }, { pins: 3, unpins: 3, dbl: 0, pinned: false },
+    "a pin the user removed must stay removed: GMRec must never pin it back");
 
   // A tile the user pinned themselves is left alone: pressing Pin again would toggle it OFF,
   // which is the opposite of what selecting it is meant to do.
+  assert.equal(await selectTile(detected[0].id, false), true);
   await meet.evaluate(() => document.querySelector('[aria-label^="Pin Mohammed"]').click());
   await poll(pinState, value => value.pinned, "manual pin applied");
   assert.equal(await selectTile(detected[0].id, true), true);
-  // Well past the reconciler's cooldown and several scans, so a wrong implementation has had
-  // every chance to press something.
   await meet.waitForTimeout(2500);
-  assert.deepEqual({ ...await pinState() }, { pins: 5, unpins: 4, dbl: 0, pinned: true },
-    "a tile that is already pinned must not be toggled, and that pin must not be released later");
+  assert.deepEqual({ ...await pinState() }, { pins: 4, unpins: 3, dbl: 0, pinned: true },
+    "a tile that is already pinned must not be toggled by selecting it");
+  // Leave the fixture unpinned, or every later pin path in this file is unreachable and a
+  // regression there would be invisible.
+  await meet.evaluate(() => document.querySelector('[aria-label^="Unpin Mohammed"]').click());
+  await poll(pinState, value => !value.pinned, "fixture left unpinned for the stages below");
   console.log("Tile auto-detection, toggle, and auto-pin passed");
 
   // Meet replaces the <video> element whenever a camera is toggled or switched. That must
@@ -233,10 +240,13 @@ try {
     const video = document.createElement("video");
     video.id = "share"; video.autoplay = true; video.muted = true; video.playsInline = true;
     video.style.cssText = "width:800px;height:450px";
-    const unpin = document.createElement("button");
-    unpin.setAttribute("aria-label", "Unpin Mohammed Ahmed's presentation");
-    unpin.textContent = "push_pin";
-    host.append(video, unpin); document.body.append(host);
+    // "Pin", not "Unpin": an Unpin label says this tile IS pinned, and a permanently pinned tile
+    // in the fixture would make every later pin assertion in this file vacuous. Naming still
+    // works — the name regex accepts either form.
+    const pin = document.createElement("button");
+    pin.setAttribute("aria-label", "Pin Mohammed Ahmed's presentation");
+    pin.textContent = "push_pin";
+    host.append(video, pin); document.body.append(host);
     video.srcObject = await window.__remoteFeed(800, 450, 140);
   });
   const withShare = await poll(readTiles, value => value.some(tile => tile.kind === "screen"), "screen share auto-detected mid-recording");
@@ -398,8 +408,6 @@ try {
       video.pause(); video.remove(); URL.revokeObjectURL(url);
       return result;
     }, bytes.toString("base64"));
-    playback.push({ filename: record.filename, ...result });
-
     console.log("Playback inspection", record.filename, result);
     playback.push({ filename: record.filename, ...result });
   }
@@ -531,6 +539,9 @@ try {
   const beforeSecondRun = new Set((await request("list")).map(record => record.id));
   // Selection persists across stop/start, so this run records both tiles and no self camera.
   assert.equal((await request("start", { settings: { includeSelf: false, quality: "1080p", name: "gmrec-participant-only" } })).phase, "recording");
+  // Starting again must pin again. Selection survives a stop, so nothing re-selects a tile here —
+  // a version that only pins on select records every run after the first unpinned, silently.
+  await poll(pinState, value => value.pinned, "the second recording pins too, without the tile being re-selected");
   await new Promise(resolve => setTimeout(resolve, 2200));
   await meet.close();
   await poll(() => request("status"), state => state.phase === "idle", "auto stop after tab closure");

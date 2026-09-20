@@ -23,7 +23,7 @@ is expected to work on any WebRTC site the user adds. Site-specific knowledge be
 ```bash
 npm install
 npm run typecheck        # tsc --noEmit
-npm test                 # 16 unit tests, no browser needed, ~1s
+npm test                 # 19 unit tests, no browser needed, ~1s
 npm run build            # esbuild -> dist/
 npm run test:browser     # full integration suite in a real Chrome, ~60s
 ```
@@ -155,38 +155,45 @@ exposes (the same labels names are read from, so they are known to be in the DOM
 hovering). It is gated behind `adapter.spotlight`, set only where a pin control is known to exist
 and to mean this.
 
-**GMRec remembers exactly one thing about pinning: `ourPin`, the id of the tile it pinned, or
-null.** Everything else — whether that tile is still pinned, whether anything else is — is read
-back off the page by `reconcilePins()` on every scan. Three rounds of review found bugs in
-earlier versions and *every one* was remembered state drifting from what the page showed: a pin
-claimed before the click landed, a claim dropped while the pin stayed, two tiles both believing
-they held the one pin Meet allows. Do not reintroduce per-tile pin flags or confirmation timers.
+**Taking a pin is edge-triggered; giving one back is an obligation.** GMRec presses Pin because
+the user just selected a tile or just started recording — never because a loop compared the page
+against what it wanted. It holds `ourPin` (the id of the tile it pinned) and at most one
+`pinTask` ({id, want, until}); `reconcilePins()` only ever drives an outstanding task.
+
+Four rounds of review went into this, and the failures fell into two families. **Drift:** state
+remembered about the pin disagreeing with the page — a pin claimed before the click landed, a
+claim dropped while the pin stayed, two tiles both believing they held the one pin Meet allows.
+**Fighting the user:** a reconciling loop that restores "the pin GMRec wants" cannot tell its own
+failed click from a deliberate choice, so unpinning by hand just pins straight back and the user
+can never get their grid view. Do not add per-tile pin flags, confirmation timers, or a loop that
+takes a pin nobody asked for.
 
 Four rules follow:
 
-1. **Confirm the flip asynchronously.** The click only asks; the product updates its state and
-   re-renders afterwards, so the control has *not* flipped in the same tick. Claiming the pin
-   synchronously left `pinnedByUs` false on real Meet, which meant the pin was never released.
-   `confirmPin` re-checks on a timer instead.
+1. **Take on an edge, once.** `wantPin` is called from `setSelected(on)` and from the
+   recording-started transition — the latter matters because selection survives a stop, so
+   without it every run after the first is unpinned. Nothing else may create a `take` task.
 2. **Never take a pin that is already taken.** Meet spotlights one tile at a time, so pinning
    anything drops whatever is pinned now — including a tile the user pinned themselves.
-   `foreignPinExists()` checks the whole document, excluding pins GMRec itself holds so that
-   re-selecting and multi-select still work. Consequence, accepted on purpose: while a screen
-   share is on the main stage, nothing gets auto-pinned.
+   `anythingIsPinned()` vetoes the whole attempt. Consequence, accepted on purpose: while a
+   screen share is on the main stage, nothing gets auto-pinned.
 3. **"Unreadable" is not "unpinned".** `pinStateOf` returns `pinned` / `unpinned` / **`unknown`**.
    A tile detached mid-re-render — which pinning itself triggers, since it changes the layout —
-   is unknown, and the claim is kept. Collapsing that into "unpinned" drops the claim while Meet
-   is still pinned, and the pin is stranded for the rest of the call. Likewise, nothing is read
-   at all while a click is still settling (`pinCooldownUntil`), or our own pin would read as
-   never having happened.
-4. **Do not disambiguate pin controls by `entry.kind`.** It is circular: `detectKind` calls any
-   container carrying a presentation label a screen tile, so the kind is derived from the very
-   labels it would be used to choose between. A presentation gets its own tile in Meet, so the
-   first match in the container is the right one.
+   or one whose container carries no pin control either way, is unknown, and the claim is kept.
+   Collapsing that into "unpinned" drops the claim while Meet is still pinned. Likewise nothing
+   is read while a click is still settling (`pinCooldownUntil`), or our own pin reads as never
+   having happened.
+4. **Discharge the claim when you ask for it back.** `give-back` clears `ourPin` on the click.
+   Holding it longer means a pin the user sets moments later gets adopted as ours and then taken
+   away from them. Every task carries `until`, so no failure can switch pinning off for the
+   rest of the call — the previous version had a `pinsSuspended` latch that did exactly that.
 
-The fixture flips its label on a timer **on purpose**. Flipping it synchronously is what hid
-rule 1: the test passed while the feature was broken in Meet. If you touch this, re-break the
-code and confirm the suite fails.
+Two things the fixture does **on purpose**: it flips its Pin label on a timer, because flipping
+it synchronously once hid a bug where the pin was claimed in the same tick and never released;
+and it leaves itself unpinned at the end of the pin stage, because a permanently pinned fixture
+makes every later pin assertion in the file vacuous. If you touch any of this, re-break the code
+and confirm the suite fails — three separate times a test here passed while the feature was
+broken in Meet.
 
 ### 14. A site is authorised by origin, not by frame index
 
