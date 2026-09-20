@@ -116,7 +116,9 @@ nothing else — and removing the site revokes it.
 
 Pinning is deliberately limited to sites where a pin control is known to exist and to mean this.
 Elsewhere GMRec records what the page already sends rather than pressing buttons it cannot
-interpret.
+interpret. It also never takes a pin that is already taken — so if you have pinned someone
+yourself, or a screen share is on the main stage, nothing is auto-pinned and the tile records at
+whatever quality the meeting is already sending.
 
 **Known limitation:** the call must render in the tab's own document. A call embedded from
 another origin in an iframe is not reached yet.

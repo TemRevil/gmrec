@@ -155,18 +155,30 @@ exposes (the same labels names are read from, so they are known to be in the DOM
 hovering). It is gated behind `adapter.spotlight`, set only where a pin control is known to exist
 and to mean this.
 
-Three rules follow:
+A pin is a three-state thing on the entry — `none` → `requested` (we clicked) → `held`
+(confirmed). Ownership starts at the *click*, not at the confirmation: a tile deselected in
+between must still be released, or Meet stays pinned to something nobody is recording and
+`foreignPinExists()` then blocks every later pin.
+
+Four rules follow:
 
 1. **Confirm the flip asynchronously.** The click only asks; the product updates its state and
    re-renders afterwards, so the control has *not* flipped in the same tick. Claiming the pin
    synchronously left `pinnedByUs` false on real Meet, which meant the pin was never released.
    `confirmPin` re-checks on a timer instead.
 2. **Never take a pin that is already taken.** Meet spotlights one tile at a time, so pinning
-   anything drops whatever is pinned now — including a tile the user pinned themselves, or a
-   different tile GMRec is recording. `somethingIsPinned()` checks the whole document, not just
-   the target tile.
-3. **Pick the control that matches the tile.** A presenting participant's tile carries both
-   `Pin Ada` and `Pin Ada's presentation`; first-in-DOM-order pins the wrong one.
+   anything drops whatever is pinned now — including a tile the user pinned themselves.
+   `foreignPinExists()` checks the whole document, excluding pins GMRec itself holds so that
+   re-selecting and multi-select still work. Consequence, accepted on purpose: while a screen
+   share is on the main stage, nothing gets auto-pinned.
+3. **Never give up a watch because the element vanished.** Pinning changes the layout, which is
+   exactly when Meet swaps a tile's `<video>`. The entry survives (`scan()` rebinds it), so the
+   timer chain must too — and it must be cleared in `attemptUnpin`, when a tile is pruned, and
+   in `__gmrecDispose`, or it outlives everything that could release the pin.
+4. **Do not disambiguate pin controls by `entry.kind`.** It is circular: `detectKind` calls any
+   container carrying a presentation label a screen tile, so the kind is derived from the very
+   labels it would be used to choose between. A presentation gets its own tile in Meet, so the
+   first match in the container is the right one.
 
 The fixture flips its label on a timer **on purpose**. Flipping it synchronously is what hid
 rule 1: the test passed while the feature was broken in Meet. If you touch this, re-break the

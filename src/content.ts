@@ -6,13 +6,15 @@ import { errorMessage, fitRect, formatTime, meetingFolder, safeName } from "./sh
 const scope = globalThis as typeof globalThis & { __gmrecDispose?: () => void };
 scope.__gmrecDispose?.();
 
+type PinState = "none" | "requested" | "held";
 type Tracked = {
   video: HTMLVideoElement;
   id: string;
   ordinal: number;
   kind: TileKind;
   selected: boolean;
-  pinnedByUs: boolean;
+  pin: PinState;
+  pinTimer?: number;
   mirrored: boolean;
   key: string | null;
   missingSince?: number;
@@ -567,66 +569,97 @@ function drawOverlay(now: number) {
 // from, so they are known to be present without hovering first.
 const PIN_LABEL = /^pin\b/i;
 const UNPIN_LABEL = /^(unpin\b|remove from screen\b)/i;
-const PRESENTATION_LABEL = /presentation|presenting|screen\s*shar/i;
 const PIN_CONTROLS = "button, [role='button'], [role='menuitem']";
+// How long to keep watching for a click to take effect, at PIN_POLL_MS a step. Meet re-renders,
+// and may swap the tile's whole element, well after the click returns.
+const PIN_POLL_MS = 100;
+const PIN_ATTEMPTS = 20;
 function labelOf(node: Element): string {
   return (node.getAttribute("aria-label") ?? node.getAttribute("data-tooltip") ?? node.getAttribute("title") ?? "").trim();
 }
-// A presenting participant's tile carries controls for both their camera and their presentation
-// ("Pin Ada", "Pin Ada's presentation"), so taking the first match in DOM order can pin the wrong
-// one — and can make the already-pinned check below veto a camera tile because the presentation
-// is pinned. Prefer the control that talks about what this tile actually is.
+function tileContainerOf(node: Element): Element | null {
+  for (const selector of adapter.containers) {
+    const hit = deepClosest(node, selector);
+    if (hit) return hit;
+  }
+  return null;
+}
+// Deliberately the first match in the tile: a presentation gets a tile of its own, so one
+// container never holds both "Pin Ada" and "Pin Ada's presentation". Preferring by tile kind
+// would be circular anyway — detectKind calls any container carrying a presentation label a
+// screen tile, so the kind is derived from the very labels it would be used to choose between.
 function pinControl(entry: Tracked, pattern: RegExp): HTMLElement | null {
   const container = containerOf(entry.video);
   if (!container) return null;
-  const matches = deepQueryAll(container, PIN_CONTROLS)
-    .map(node => ({ node: node as HTMLElement, label: labelOf(node) }))
-    .filter(hit => hit.label && pattern.test(hit.label));
-  const wantsPresentation = entry.kind === "screen";
-  return (matches.find(hit => PRESENTATION_LABEL.test(hit.label) === wantsPresentation) ?? matches[0])?.node ?? null;
+  for (const node of deepQueryAll(container, PIN_CONTROLS)) {
+    const label = labelOf(node);
+    if (label && pattern.test(label)) return node as HTMLElement;
+  }
+  return null;
 }
-// Meet spotlights one tile at a time, so pinning anything drops whatever is pinned now. If the
-// user has already pinned someone, that is their view and their choice of who gets the good
-// stream; quietly stealing it is worse than recording what Meet already sends.
-function somethingIsPinned(): boolean {
-  return deepQueryAll(document, PIN_CONTROLS).some(node => UNPIN_LABEL.test(labelOf(node)));
+// Meet spotlights one tile at a time, so pinning anything drops whatever is pinned now. A pin
+// GMRec took is ours to move; anything else is the user's view and their choice of who gets the
+// good stream, and quietly stealing it is worse than recording what Meet already sends.
+function foreignPinExists(): boolean {
+  const ours: Element[] = [];
+  for (const entry of tracked.values()) {
+    if (entry.pin === "none") continue;
+    const container = containerOf(entry.video);
+    if (container) ours.push(container);
+  }
+  return deepQueryAll(document, PIN_CONTROLS).some(node => {
+    if (!UNPIN_LABEL.test(labelOf(node))) return false;
+    const container = tileContainerOf(node);
+    return !container || !ours.includes(container);
+  });
+}
+function clearPinTimer(entry: Tracked) {
+  if (entry.pinTimer !== undefined) window.clearTimeout(entry.pinTimer);
+  entry.pinTimer = undefined;
 }
 // The click only asks; the product updates its own state and re-renders afterwards, so the
-// control has NOT flipped yet in this tick. Claiming the pin synchronously left pinnedByUs false
-// on real Meet, which meant the pin was never released again.
+// control has NOT flipped yet in this tick. Claiming the pin synchronously left the entry
+// marked unpinned on real Meet, which meant the pin was never released again.
+//
+// Nothing here gives up because the element vanished: pinning changes the layout, which is
+// exactly when Meet swaps a tile's <video> for a new one. The entry survives that (scan()
+// rebinds it), so the watch has to survive it too.
 function confirmPin(entry: Tracked, attempt: number) {
-  if (!entry.selected || !entry.video.isConnected) return;
-  if (pinControl(entry, UNPIN_LABEL)) { entry.pinnedByUs = true; return; }
-  if (attempt >= 10) return; // ~1s; the click did not take, so no pin is claimed.
-  window.setTimeout(() => confirmPin(entry, attempt + 1), 100);
+  entry.pinTimer = undefined;
+  if (entry.pin === "none") return; // released while we were waiting
+  if (pinControl(entry, UNPIN_LABEL)) { entry.pin = "held"; return; }
+  if (attempt >= PIN_ATTEMPTS) { entry.pin = "none"; return; } // the click never took
+  entry.pinTimer = window.setTimeout(() => confirmPin(entry, attempt + 1), PIN_POLL_MS);
 }
 function attemptPin(entry: Tracked) {
-  entry.pinnedByUs = false;
   // Only where a pin control is known to exist and to mean this. Elsewhere GMRec records what
   // the page already sends rather than pressing buttons it does not understand.
-  if (!adapter.spotlight) return;
+  if (!adapter.spotlight || entry.pin !== "none") return;
   try {
-    // An unpin control anywhere means a tile is already pinned — this one or someone else's.
-    // Either way pressing pin now would toggle a choice that is not ours to change.
-    if (somethingIsPinned()) return;
+    // Already pinned: pressing Pin again would toggle it off, which is the opposite of the point.
+    if (pinControl(entry, UNPIN_LABEL)) return;
+    if (foreignPinExists()) return;
     const control = pinControl(entry, PIN_LABEL);
     if (!control) return;
+    // Owned from the moment we ask, not from when it is confirmed. Deselecting in between must
+    // still release it, or Meet stays pinned to a tile nobody is recording.
+    entry.pin = "requested";
     control.click();
+    clearPinTimer(entry);
     confirmPin(entry, 0);
   } catch { /* Meet's DOM can change at any time; pinning is a quality aid, never required. */ }
 }
-function attemptUnpin(entry: Tracked) {
-  if (!entry.pinnedByUs || !adapter.spotlight) return;
+function attemptUnpin(entry: Tracked, attempt = 0) {
+  if (entry.pin === "none" || !adapter.spotlight) return;
+  clearPinTimer(entry);
   try {
-    // Gone from the page: nothing left to release, and nothing left to own.
-    if (!entry.video.isConnected) { entry.pinnedByUs = false; return; }
     const control = pinControl(entry, UNPIN_LABEL);
-    // Mid-re-render the control can be missing. Keep ownership so a later attempt can still
-    // give the pin back, rather than forgetting we took it.
-    if (!control) return;
-    control.click();
-    entry.pinnedByUs = false;
-  } catch { /* best effort */ }
+    if (control) { control.click(); entry.pin = "none"; return; }
+    // The control can be missing because the pin has not landed yet, or because Meet is
+    // re-rendering. Keep the claim and keep looking, rather than stranding the pin.
+    if (attempt >= PIN_ATTEMPTS) { entry.pin = "none"; return; }
+    entry.pinTimer = window.setTimeout(() => attemptUnpin(entry, attempt + 1), PIN_POLL_MS);
+  } catch { entry.pin = "none"; }
 }
 async function call(type: string, payload: object = {}): Promise<unknown> {
   const reply = await chrome.runtime.sendMessage({ target: "background", type, ...payload });
@@ -805,7 +838,7 @@ function scan() {
       tracked.set(video, previous);
       continue;
     }
-    const entry: Tracked = { video, id: newId(video), ordinal: idCounter, kind, selected: false, pinnedByUs: false, mirrored: isMirrored(video), key, label: "", source: video.srcObject };
+    const entry: Tracked = { video, id: newId(video), ordinal: idCounter, kind, selected: false, pin: "none", mirrored: isMirrored(video), key, label: "", source: video.srcObject };
     entry.label = resolveLabel(entry);
     tracked.set(video, entry);
     if (active && kind === "screen") promptForScreenShare(entry);
@@ -822,6 +855,9 @@ function scan() {
     // A tile vanishing for good (someone leaving) must not end its file. The recorder keeps it
     // running until Stop.
     closeLoopback(entry.id);
+    // The tile is gone for good, so its pin cannot be given back and the watch has nothing left
+    // to watch; dropping the entry with a live timer would leave one running forever.
+    clearPinTimer(entry);
     teardownTileOverlay(entry);
     tracked.delete(video);
   }
@@ -857,7 +893,9 @@ scope.__gmrecDispose = () => {
   chrome.runtime.onMessage.removeListener(listener);
   if (overlayRaf !== undefined) cancelAnimationFrame(overlayRaf);
   for (const id of Array.from(loopbacks.keys())) closeLoopback(id);
-  for (const entry of tracked.values()) teardownTileOverlay(entry);
+  // A pending pin watch outlives this script otherwise, and would mark a tile as ours long
+  // after anything is left to release it.
+  for (const entry of tracked.values()) { clearPinTimer(entry); teardownTileOverlay(entry); }
   tracked.clear();
   previewHost?.remove();
   promptHost?.remove();
