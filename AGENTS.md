@@ -155,10 +155,16 @@ exposes (the same labels names are read from, so they are known to be in the DOM
 hovering). It is gated behind `adapter.spotlight`, set only where a pin control is known to exist
 and to mean this.
 
-**Taking a pin is edge-triggered; giving one back is an obligation.** GMRec presses Pin because
-the user just selected a tile or just started recording — never because a loop compared the page
-against what it wanted. It holds `ourPin` (the id of the tile it pinned) and at most one
-`pinTask` ({id, want, until}); `reconcilePins()` only ever drives an outstanding task.
+**Reading is continuous; taking is not.** Letting go of a claim that no longer matches the page
+cannot fight anyone, so `refreshPinClaim()` runs on every scan. Pressing Pin can, so it happens
+only on an edge — the user ticked a tile, or recording reached `"recording"`. GMRec holds
+`ourPin` (the id of the tile it pinned) and at most one `pinTask` ({id, want, until, thenTake});
+`reconcilePins()` refreshes the claim, then drives any outstanding task.
+
+Both halves are needed and neither is sufficient. A loop that also *takes* re-pins tiles the user
+just unpinned. A design with no continuous read lets `ourPin` rot into a permanent "I already
+hold the pin", which silently refuses every later request — including the one a fresh recording
+makes.
 
 Four rounds of review went into this, and the failures fell into two families. **Drift:** state
 remembered about the pin disagreeing with the page — a pin claimed before the click landed, a
@@ -171,22 +177,33 @@ takes a pin nobody asked for.
 Four rules follow:
 
 1. **Take on an edge, once.** `wantPin` is called from `setSelected(on)` and from the
-   recording-started transition — the latter matters because selection survives a stop, so
-   without it every run after the first is unpinned. Nothing else may create a `take` task.
-2. **Never take a pin that is already taken.** Meet spotlights one tile at a time, so pinning
-   anything drops whatever is pinned now — including a tile the user pinned themselves.
-   `anythingIsPinned()` vetoes the whole attempt. Consequence, accepted on purpose: while a
-   screen share is on the main stage, nothing gets auto-pinned.
+   transition into `phase === "recording"` — the latter matters because selection survives a
+   stop, so without it every run after the first is unpinned. Gate on `"recording"`, not on
+   "not idle": `"starting"` is published *before* any device is acquired, so a start that then
+   fails would take the user's pin and move their view for a second. Nothing else may create a
+   `take` task, and `wantPin` queues it without judging — deciding whether it is allowed is the
+   reconciler's job, because a claim can be stale by a few hundred milliseconds and a request
+   refused here has nothing left to retry it.
+2. **Never take a pin that is already taken, and never wait for one to free.** Meet spotlights
+   one tile at a time, so pinning anything drops whatever is pinned now — including a tile the
+   user pinned themselves. `anythingIsPinned()` **drops** the request rather than retrying it:
+   a request that waits for the slot fires the moment the user unpins by hand, undoing their
+   action seconds after the fact. Missing a pin costs sharpness; taking one back costs the user
+   control of their meeting. Consequence, accepted on purpose: while a screen share is on the
+   main stage, nothing gets auto-pinned.
 3. **"Unreadable" is not "unpinned".** `pinStateOf` returns `pinned` / `unpinned` / **`unknown`**.
    A tile detached mid-re-render — which pinning itself triggers, since it changes the layout —
    or one whose container carries no pin control either way, is unknown, and the claim is kept.
    Collapsing that into "unpinned" drops the claim while Meet is still pinned. Likewise nothing
    is read while a click is still settling (`pinCooldownUntil`), or our own pin reads as never
    having happened.
-4. **Discharge the claim when you ask for it back.** `give-back` clears `ourPin` on the click.
-   Holding it longer means a pin the user sets moments later gets adopted as ours and then taken
-   away from them. Every task carries `until`, so no failure can switch pinning off for the
-   rest of the call — the previous version had a `pinsSuspended` latch that did exactly that.
+4. **Discharge the claim when you ask for it back.** `give-back` clears `ourPin` on the click and
+   keeps the task only to confirm the release. Holding the claim longer means a pin the user sets
+   moments later gets adopted as ours and then taken away from them. Every task carries `until`,
+   and expiry clears `ourPin` too, so no failure can switch pinning off for the rest of the call.
+   `releasePinNow()` presses only the owning tile's own control — a document-wide search for "the
+   one Unpin on the page" clicks whatever pin happens to exist, which after a stale claim is the
+   user's.
 
 Two things the fixture does **on purpose**: it flips its Pin label on a timer, because flipping
 it synchronously once hid a bug where the pin was claimed in the same tick and never released;

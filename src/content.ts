@@ -28,6 +28,9 @@ const loopbacks = new Map<string, Loopback>();
 const dismissedScreenIds = new Set<string>();
 let idCounter = 0;
 let active = false;
+// Tracks the transition into "recording" specifically; "starting" is published before any
+// device is acquired, so it is not a safe moment to touch the user’s view.
+let wasRecording = false;
 let overlayRaf: number | undefined;
 let promptForId: string | undefined;
 let promptHost: HTMLDivElement | undefined;
@@ -595,87 +598,134 @@ function anythingIsPinned(): boolean {
 // apart from a deliberate choice. Giving a pin back is the opposite: it is an obligation, so it
 // retries until the page confirms it, within a deadline.
 //
-// Nothing here is a latch. Every piece of state is either the one pin we hold, or a task with an
-// expiry, so no failure can leave pinning switched off for the rest of the call.
+// The split that makes both halves safe: READING the page is continuous, TAKING is not.
+// Letting go of a claim that no longer matches the page can never fight anyone, so it happens on
+// every scan. Pressing Pin can, so it happens only on an edge. An earlier version tried to do
+// both in one loop and re-pinned tiles the user had just unpinned; the version after that dropped
+// the loop entirely and left the claim to rot, which switched pinning off for the rest of a call.
 let ourPin: string | null = null;
-let pinTask: { id: string; want: "take" | "give-back"; until: number } | null = null;
+let pinTask: { id: string; want: "take" | "give-back"; until: number; thenTake: boolean } | null = null;
 let pinCooldownUntil = 0;
 const PIN_TASK_MS = 6000;
 // Three answers, not two. A tile that cannot be read right now — detached mid-re-render, which
-// pinning itself provokes — is unreadable, NOT unpinned. Collapsing those two drops the claim
-// while Meet is still pinned, and the pin is stranded.
+// pinning itself provokes, or mounted without its controls yet — is unreadable, NOT unpinned.
+// Collapsing those two drops the claim while Meet is still pinned, and the pin is stranded.
 function pinStateOf(entry: Tracked): "pinned" | "unpinned" | "unknown" {
   if (!entry.video.isConnected) return "unknown";
-  const container = containerOf(entry.video);
-  // A container with no pin control either way is a half-built tile, not an unpinned one.
-  if (!container || !deepQueryAll(container, PIN_CONTROLS).some(node => PIN_LABEL.test(labelOf(node)) || UNPIN_LABEL.test(labelOf(node)))) return "unknown";
-  return pinControl(entry, UNPIN_LABEL) ? "pinned" : "unpinned";
+  if (pinControl(entry, UNPIN_LABEL)) return "pinned";
+  return pinControl(entry, PIN_LABEL) ? "unpinned" : "unknown";
 }
-function entryById(id: string | null): Tracked | undefined {
-  return id ? Array.from(tracked.values()).find(entry => entry.id === id) : undefined;
+function entryById(id: string | null | undefined): Tracked | undefined {
+  if (!id) return undefined;
+  for (const entry of tracked.values()) if (entry.id === id) return entry;
+  return undefined;
+}
+function firstSelectedId(): string | undefined {
+  for (const entry of tracked.values()) if (entry.selected) return entry.id;
+  return undefined;
+}
+// A take that has not happened yet must not fire after the reason for it is gone: the tile was
+// unticked again, or recording stopped. Otherwise GMRec pins something seconds after the fact.
+function cancelTake(id?: string) {
+  if (pinTask?.want === "take" && (id === undefined || pinTask.id === id)) pinTask = null;
 }
 function wantPin(id: string | undefined) {
-  if (!adapter.spotlight || !id || ourPin) return;
-  pinTask = { id, want: "take", until: Date.now() + PIN_TASK_MS };
+  if (!adapter.spotlight || !id) return;
+  // Re-ticked before the release ran: drop the release rather than let it unpin a tile that is
+  // selected again, which nothing afterwards would re-pin.
+  if (pinTask?.want === "give-back" && pinTask.id === id) pinTask = null;
+  // Queued even when a pin is currently held: whether that claim is still real is the
+  // reconciler's business, and it may be stale by a few hundred milliseconds. Refusing here on a
+  // claim the user has already invalidated meant the request vanished with nothing to retry it.
+  pinTask = { id, want: "take", until: Date.now() + PIN_TASK_MS, thenTake: false };
 }
-function wantPinBack(id: string | null = ourPin) {
-  if (!adapter.spotlight || !id || ourPin !== id) return;
-  pinTask = { id, want: "give-back", until: Date.now() + PIN_TASK_MS };
+// thenTake: the slot is being freed while other tiles are still being recorded, so hand it to one
+// of them once the release lands. Not set when recording stops — then nothing should be pinned.
+function wantPinBack(id: string | null = ourPin, thenTake = false) {
+  if (!adapter.spotlight) return;
+  cancelTake(id ?? undefined);
+  if (!id || ourPin !== id) return;
+  pinTask = { id, want: "give-back", until: Date.now() + PIN_TASK_MS, thenTake };
 }
-// The first selected tile that actually offers a Pin control: one tile still rendering must not
-// stop another selected tile from being pinned.
-function pinnableSelection(): Tracked | undefined {
-  return Array.from(tracked.values()).find(entry => entry.selected && pinControl(entry, PIN_LABEL));
+// Continuous, and deliberately incapable of pressing anything: it only ever lets go.
+function refreshPinClaim() {
+  if (!ourPin || Date.now() < pinCooldownUntil) return;
+  const owner = entryById(ourPin);
+  // The tile left the call, or the pin moved: either way it is no longer ours, and holding the
+  // claim would block every later pin.
+  if (!owner || pinStateOf(owner) === "unpinned") ourPin = null;
 }
 function reconcilePins() {
   // Only where a pin control is known to exist and to mean this. Elsewhere GMRec records what
   // the page already sends rather than pressing buttons it does not understand.
-  if (!adapter.spotlight || !pinTask) return;
+  if (!adapter.spotlight) return;
   try {
     // Nothing is read while a click is still settling: the label has not flipped yet, and taking
     // that at face value would mean concluding our own pin never happened.
     if (Date.now() < pinCooldownUntil) return;
-    if (Date.now() > pinTask.until) { pinTask = null; return; } // tried long enough
+    refreshPinClaim();
+    if (!pinTask) return;
+    if (Date.now() > pinTask.until) {
+      // Tried long enough. Forget the claim too: a pin we can no longer confirm must not veto
+      // every future one. Worst case Meet stays pinned and auto-pin quietly stops — never a
+      // control pressed against the user.
+      if (pinTask.want === "give-back") ourPin = null;
+      pinTask = null;
+      return;
+    }
     const entry = entryById(pinTask.id);
     if (pinTask.want === "give-back") {
       // The tile is gone, so there is no control left to press and nothing to give back.
       if (!entry) { ourPin = null; pinTask = null; return; }
       const state = pinStateOf(entry);
-      if (state === "unknown") return;                                  // try again next scan
-      if (state === "unpinned") { ourPin = null; pinTask = null; return; } // already released
-      const control = pinControl(entry, UNPIN_LABEL);
-      if (!control) return;
+      if (state === "unknown") return; // unreadable right now; try again next scan
+      if (state === "unpinned") {
+        const next = pinTask.thenTake ? firstSelectedId() : undefined;
+        ourPin = null;
+        pinTask = null;
+        if (next) wantPin(next);
+        return;
+      }
       pinCooldownUntil = Date.now() + PIN_COOLDOWN_MS;
-      control.click();
-      // Our obligation is discharged by asking. Holding the claim past this point is how a pin
-      // the user sets moments later gets adopted, and then taken away from them.
+      pinControl(entry, UNPIN_LABEL)!.click(); // state === "pinned" proves this is there
+      // Stop claiming it the moment we ask, so a pin the user sets a second later is not adopted
+      // as ours. The task lives on only to confirm the release, and expires either way.
       ourPin = null;
-      pinTask = null;
       return;
     }
-    if (ourPin) { pinTask = null; return; }
-    // Never take a pin that exists: it is the user's view of the call, not ours to move.
+    // Still holding one — Meet allows a single pin, so wait rather than abandon: the claim above
+    // may clear a moment from now, and then this request is the one that should be honoured.
+    if (ourPin) return;
+    // Never take a pin that exists: it is the user's view of the call, not ours to move. The
+    // request is dropped, NOT retried — a request that waits for the slot to free fires the
+    // moment the user unpins by hand, which undoes their action a few seconds after the fact.
+    // Missing a pin costs sharpness; taking one back costs the user control of their meeting.
     if (anythingIsPinned()) { pinTask = null; return; }
-    const wanted = entry?.selected && pinControl(entry, PIN_LABEL) ? entry : pinnableSelection();
-    const control = wanted && pinControl(wanted, PIN_LABEL);
-    if (!wanted || !control) return;
+    // Only the tile that was asked for. Falling back to "some other selected tile" once pinned a
+    // tile the user had deliberately unpinned.
+    if (!entry || !entry.selected) { pinTask = null; return; }
+    const control = pinControl(entry, PIN_LABEL);
+    if (!control) return; // not mounted yet; the deadline bounds the wait
     pinCooldownUntil = Date.now() + PIN_COOLDOWN_MS;
     control.click();
-    ourPin = wanted.id;
+    ourPin = entry.id;
     pinTask = null;
-  } catch { pinTask = null; /* Meet's DOM changes constantly; pinning is a quality aid, never required. */ }
+  } catch {
+    // Never leave a claim behind on the way out; a stuck claim blocks pinning for the whole call.
+    ourPin = pinTask?.want === "give-back" ? null : ourPin;
+    pinTask = null;
+  }
 }
 // Hand the pin back before this script goes away, or it is stranded: the replacement starts with
-// nothing tracked, so it reads the leftover pin as the user's and never pins again.
+// nothing tracked, so it reads the leftover pin as the user's and never pins again. Only ever the
+// owning tile's own control — a document-wide search would click whatever pin happens to exist,
+// which after a stale claim is the user's.
 function releasePinNow() {
-  if (ourPin) try {
-    const owner = entryById(ourPin);
-    // Last resort when the tile itself can no longer be read: Meet allows one pin, so the single
-    // Unpin control on the page is necessarily the one we took.
-    const control = (owner && pinControl(owner, UNPIN_LABEL))
-      ?? deepQueryAll(document, PIN_CONTROLS).filter(node => UNPIN_LABEL.test(labelOf(node)))[0];
-    (control as HTMLElement | undefined)?.click();
-  } catch { /* best effort; nothing runs after this */ }
+  const owner = entryById(ourPin);
+  if (owner) try {
+    const control = pinControl(owner, UNPIN_LABEL);
+    if (control) { pinCooldownUntil = Date.now() + PIN_COOLDOWN_MS; control.click(); }
+  } catch { /* best effort */ }
   ourPin = null;
   pinTask = null;
 }
@@ -790,7 +840,9 @@ function setSelected(id: string, on: boolean): boolean {
     startOverlayLoop();
     if (active) void chrome.runtime.sendMessage({ target: "background", type: "add-tile", tile: { id: match.id, label: labelFor(match), kind: match.kind, mirrored: match.mirrored } }).catch(() => {});
   } else {
-    wantPinBack(match.id);
+    // The slot is being freed while other tiles may still be recording, so pass it on once the
+    // release lands rather than leaving everything at grid quality.
+    wantPinBack(match.id, true);
     reconcilePins();
     teardownTileOverlay(match);
     if (active) void chrome.runtime.sendMessage({ target: "background", type: "remove-tile", id }).catch(() => {});
@@ -906,10 +958,18 @@ const listener: Parameters<typeof chrome.runtime.onMessage.addListener>[0] = (me
     }
     // Starting is an edge too. Selection survives a stop, so without this every recording after
     // the first would run unpinned: nothing would ever ask for the pin again.
-    if (active && !wasActive) {
-      wantPin(pinnableSelection()?.id);
+    //
+    // Gated on "recording", not on active: "starting" is published before any device is even
+    // acquired, so a start that then fails would take the user's pin and move their view for a
+    // moment. The id is passed unconditionally — whether the control is mounted yet is the
+    // reconciler's business, and resolving it here means a start during Meet's re-render silently
+    // asks for nothing at all.
+    const nowRecording = state.phase === "recording";
+    if (nowRecording && !wasRecording) {
+      wantPin(firstSelectedId());
       reconcilePins();
     }
+    wasRecording = nowRecording;
     respond(null);
     return;
   }
