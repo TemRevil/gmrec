@@ -50,7 +50,7 @@ try {
   // Synthetic Meet: a participant tile whose <video> carries a real MediaStream, exactly the
   // shape the content script pulls the recorded track from. Frames carry a moving counter and
   // a solid colour block so playback can be checked for motion and for corruption.
-  await context.route("https://meet.google.com/**", route => route.fulfill({ contentType: "text/html", body: `<!doctype html><html><head><title>Synthetic Meet fixture</title></head><body style="margin:0;background:#ddd"><h1 style="height:60px;margin:0">Synthetic participant — no real meeting</h1><div id="tile" data-participant-id="p-mo"><video id="person" autoplay muted playsinline style="width:640px;height:360px;transform:scaleX(-1)"></video><button aria-label="Reframe">crop</button><button aria-label="Pin Mohammed Ahmed">push_pin</button><span>mic_off</span></div><script>
+  await context.route("https://meet.google.com/**", route => route.fulfill({ contentType: "text/html", body: `<!doctype html><html><head><title>Synthetic Meet fixture</title></head><body style="margin:0;background:#ddd"><h1 style="height:60px;margin:0">Synthetic participant — no real meeting</h1><div id="tile" data-participant-id="p-mo"><video id="person" autoplay muted playsinline style="width:640px;height:360px;transform:scaleX(-1)"></video><button aria-label="Reframe">crop</button><button aria-label="Pin Omar Khalil">push_pin</button><span>mic_off</span></div><script>
   function feed(width, height, hue){
     const canvas=document.createElement('canvas');canvas.width=width;canvas.height=height;
     const c=canvas.getContext('2d');let tick=0;
@@ -122,7 +122,7 @@ try {
       setTimeout(()=>btn.setAttribute('aria-label',(pinning?'Unpin ':'Pin ')+name),60);
     });
   };
-  window.__wirePin(document.querySelector('[aria-label="Pin Mohammed Ahmed"]'),'Mohammed Ahmed',
+  window.__wirePin(document.querySelector('[aria-label="Pin Omar Khalil"]'),'Omar Khalil',
     pinning=>{ if(pinning)window.__pinClicks++; else window.__unpinClicks++; });
   const audio=new AudioContext();const tone=audio.createOscillator();tone.frequency.value=440;tone.connect(audio.destination);tone.start();audio.resume();
   </script></body></html>` }));
@@ -137,7 +137,7 @@ try {
   assert.equal(detected[0].kind, "camera");
   assert.equal(detected[0].selected, false);
   // Named from the tile's own label, skipping the Material icon ligature sitting next to it.
-  assert.equal(detected[0].label, "Mohammed Ahmed", `tile should be named from Meet's control labels, got "${detected[0].label}"`);
+  assert.equal(detected[0].label, "Omar Khalil", `tile should be named from Meet's control labels, got "${detected[0].label}"`);
   assert.equal(await selectTile(detected[0].id, true), true);
   // Selecting a tile presses Meet's own Pin control, which is what actually makes Meet send a
   // higher-quality stream. A synthetic double-click does nothing in Meet, so it must not be used.
@@ -187,7 +187,7 @@ try {
   // simply pin straight back and the user could never get their grid view back.
   assert.equal(await selectTile(detected[0].id, true), true);
   await poll(pinState, value => value.pins === 3 && value.pinned, "pinned again");
-  await meet.evaluate(() => document.querySelector('[aria-label^="Unpin Mohammed"]').click());
+  await meet.evaluate(() => document.querySelector('[aria-label^="Unpin Omar"]').click());
   await poll(pinState, value => !value.pinned, "the manual unpin takes effect");
   await meet.waitForTimeout(2500); // several scans and well past the cooldown
   assert.deepEqual({ ...await pinState() }, { pins: 3, unpins: 3, dbl: 0, pinned: false },
@@ -196,7 +196,7 @@ try {
   // A tile the user pinned themselves is left alone: pressing Pin again would toggle it OFF,
   // which is the opposite of what selecting it is meant to do.
   assert.equal(await selectTile(detected[0].id, false), true);
-  await meet.evaluate(() => document.querySelector('[aria-label^="Pin Mohammed"]').click());
+  await meet.evaluate(() => document.querySelector('[aria-label^="Pin Omar"]').click());
   await poll(pinState, value => value.pinned, "manual pin applied");
   assert.equal(await selectTile(detected[0].id, true), true);
   await meet.waitForTimeout(2500);
@@ -268,18 +268,18 @@ try {
     // in the fixture would make every later pin assertion in this file vacuous. Naming still
     // works — the name regex accepts either form.
     const pin = document.createElement("button");
-    pin.setAttribute("aria-label", "Pin Mohammed Ahmed's presentation");
+    pin.setAttribute("aria-label", "Pin Omar Khalil's presentation");
     pin.textContent = "push_pin";
     // Live, not inert: GMRec already holds a pin at this point, so pressing this one would be a
     // bug — and with no handler that bug would be completely invisible.
-    window.__wirePin(pin, "Mohammed Ahmed's presentation", () => { window.__sharePinClicks++; });
+    window.__wirePin(pin, "Omar Khalil's presentation", () => { window.__sharePinClicks++; });
     host.append(video, pin); document.body.append(host);
     video.srcObject = await window.__remoteFeed(800, 450, 140);
   });
   const withShare = await poll(readTiles, value => value.some(tile => tile.kind === "screen"), "screen share auto-detected mid-recording");
   const share = withShare.find(tile => tile.kind === "screen");
   assert.equal(share.selected, false);
-  assert.equal(share.label, "Mohammed Ahmed (screen)", `screen tile mislabelled: "${share.label}"`);
+  assert.equal(share.label, "Omar Khalil (screen)", `screen tile mislabelled: "${share.label}"`);
   assert.equal(await selectTile(share.id, true), true);
   // Meet spotlights one tile at a time. GMRec already holds a pin, so selecting the share must
   // not press its Pin control — doing so would move the user's view onto the presentation.
@@ -327,7 +327,7 @@ try {
   assert.match([...folders][0], /^GMRec\/.+-\d{4}-\d{2}-\d{2}-\d{4}$/, "folder is named for the meeting and dated");
   // Inside the folder, files are named for who is in them and nothing else.
   assert.deepEqual([...recordings.map(r => r.filename)].sort(),
-    ["Mohammed-Ahmed-screen.mp4", "Mohammed-Ahmed.mp4", "meeting-audio.m4a", "self.mp4"],
+    ["Omar-Khalil-screen.mp4", "Omar-Khalil.mp4", "meeting-audio.m4a", "self.mp4"],
     "files are named for the participant and written as MP4");
   const audioOnly = recordings.filter(r => /^meeting-audio\.m4a$/.test(r.filename));
   assert.equal(audioOnly.length, 1, "a standalone meeting-audio file is always written");
@@ -352,8 +352,8 @@ try {
   assert.match(manifest.encoding.video, /^H\.264 High profile/, `expected High profile, got ${manifest.encoding.video}`);
   assert.equal(manifest.encoding.audio, "AAC-LC");
   assert.equal(manifest.files.length, 4);
-  const camera = manifest.files.find(f => f.file === "Mohammed-Ahmed.mp4");
-  assert.equal(camera.name, "Mohammed Ahmed", "the manifest carries the tile name the file is named for");
+  const camera = manifest.files.find(f => f.file === "Omar-Khalil.mp4");
+  assert.equal(camera.name, "Omar Khalil", "the manifest carries the tile name the file is named for");
   assert.equal(camera.kind ?? camera.source, "participant camera");
   assert.ok(camera.width > 0 && camera.height > 0 && camera.durationSeconds > 0, JSON.stringify(camera));
   assert.ok(manifest.files.every(f => f.complete && f.bytes > 1000), JSON.stringify(manifest.files));
@@ -445,8 +445,8 @@ try {
   }
   // Each tile is recorded at its source stream's own native size, not a fixed canvas size.
   // Files are named after the tile, not "Participant N".
-  const cameraFile = playback.find(p => /^Mohammed-Ahmed\.mp4$/i.test(p.filename));
-  const screenFile = playback.find(p => /^Mohammed-Ahmed-screen\.mp4$/i.test(p.filename));
+  const cameraFile = playback.find(p => /^Omar-Khalil\.mp4$/i.test(p.filename));
+  const screenFile = playback.find(p => /^Omar-Khalil-screen\.mp4$/i.test(p.filename));
   const selfFile = playback.find(p => /^self\.mp4$/.test(p.filename));
   assert.ok(cameraFile && screenFile && selfFile, `unexpected filenames: ${playback.map(p => p.filename).join(", ")}`);
   for (const result of playback) {

@@ -10,8 +10,8 @@ No server, no account, no upload. Everything stays on the machine it was recorde
 
 ```
 Downloads/GMRec/Weekly-sync-2026-09-19-1430/
-├── Mohammed-Ahmed.mp4          ← his camera, his aspect ratio, his voice
-├── Mohammed-Ahmed-screen.mp4   ← his screen share, as its own file
+├── Omar-Khalil.mp4          ← his camera, his aspect ratio, his voice
+├── Omar-Khalil-screen.mp4   ← his screen share, as its own file
 ├── self.mp4                    ← your camera + your microphone
 ├── meeting-audio.m4a           ← the whole meeting's sound, as a backup
 └── recording-info.json         ← what each file contains

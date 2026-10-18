@@ -70,7 +70,7 @@ class Tile extends HTMLElement{
 }
 customElements.define('dyte-name-tag',NameTag);
 customElements.define('dyte-participant-tile',Tile);
-for(const [name,hue] of [['Aya Hassan',200],['Mohammed Ahmed',20]]){
+for(const [name,hue] of [['Aya Hassan',200],['Omar Khalil',20]]){
   const tile=document.createElement('dyte-participant-tile');
   tile.setAttribute('data-name',name);tile.setAttribute('data-hue',hue);
   document.getElementById('grid').append(tile);
@@ -127,7 +127,7 @@ try {
     "fixture is wrong: the videos must be inside shadow roots for this test to mean anything");
 
   const dyteTiles = await poll(() => tilesOn(adplist), list => Array.isArray(list) && list.length === 2, "two Dyte tiles detected");
-  assert.deepEqual([...dyteTiles.map(tile => tile.label)].sort(), ["Aya Hassan", "Mohammed Ahmed"],
+  assert.deepEqual([...dyteTiles.map(tile => tile.label)].sort(), ["Aya Hassan", "Omar Khalil"],
     `names must come from the shadow-rendered name tag, got ${JSON.stringify(dyteTiles)}`);
   assert.ok(dyteTiles.every(tile => tile.kind === "camera"), JSON.stringify(dyteTiles));
   // Ids stay stable across scans, so a tile is not rediscovered every 500ms.
@@ -139,7 +139,7 @@ try {
   await ask("select", { id: dyteTiles[0].id, on: true });
   const selected = (await ask("selection")).data;
   assert.equal(selected.tiles.length, 1);
-  assert.ok(["Aya Hassan", "Mohammed Ahmed"].includes(selected.tiles[0].label), JSON.stringify(selected));
+  assert.ok(["Aya Hassan", "Omar Khalil"].includes(selected.tiles[0].label), JSON.stringify(selected));
   console.log("Selection carries the real name through to the recorder");
   await adplist.close();
 

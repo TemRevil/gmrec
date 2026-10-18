@@ -121,7 +121,7 @@ tiles for one person**. `tileKey()` uses `data-participant-id` plus kind, with a
 
 ### 9. Names come from Meet's control labels, not from leaf text
 
-A naive text scan picked up `"Reframe"` and `"Unpin Mohammed Ahmed's presentation…"` as names.
+A naive text scan picked up `"Reframe"` and `"Unpin Omar Khalil's presentation…"` as names.
 `NAME_FROM_LABEL` parses aria-labels (`Pin <Name>`, `<Name> is presenting`, …) and the leaf scan
 skips `button, [role="button"], [role="menuitem"], [aria-label], [data-tooltip]`.
 

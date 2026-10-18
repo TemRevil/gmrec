@@ -222,8 +222,8 @@ const UI_TEXT = new Set([
   "reframe", "pin to screen", "remove from screen", "options", "more", "settings",
 ]);
 // Meet's control labels are written for screen readers, so they are far more stable than its
-// generated class names, and they embed the participant's name: "Unpin Mohammed Ahmed's
-// presentation", "Pin Mohammed Ahmed", "Mohammed Ahmed is presenting". Pulling the name out of
+// generated class names, and they embed the participant's name: "Unpin Omar Khalil's
+// presentation", "Pin Omar Khalil", "Omar Khalil is presenting". Pulling the name out of
 // those is much more reliable than hunting for the right div.
 const NAME_FROM_LABEL: RegExp[] = [
   /^(?:un)?pin\s+(.+?)'s\s+presentation\b/i,
